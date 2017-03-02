@@ -1,0 +1,168 @@
+<!DOCTYPE HTML>
+<html>
+  <head>
+	<script>
+		function Vec2(x, y) {
+			this.x = x;
+			this.y = y;
+			this.mult_i = function() {
+				var t = x;
+				this.x = -y;
+				this.y = t;
+				return this;
+			}
+			this.mult = function(a) {
+				this.x *= a;
+				this.y *= a;
+				return this;
+			}
+			this.normalize = function() {
+				var n = norm(this);
+				this.x /= n;
+				this.y /= n;
+				return this;
+			}
+			this.copy = function() {
+				return new Vec2(x, y);
+			}
+			this.add = function(v, a) {
+				this.x += v.x * a;
+				this.y += v.y * a;
+				return this;
+			}
+		}
+		
+		function sub(u, v) {
+			return new Vec2(u.x - v.x, u.y - v.y);
+		}
+		
+		function dot(u, v) {
+			return u.x * v.x + u.y * v.y;
+		}
+		
+		function norm2(u) {
+			return dot(u, u);
+		}
+		
+		function norm(u) {
+			return Math.sqrt(norm2(u));
+		}
+		
+		function cross(u, v) {
+			return u.x*v.y-u.y*v.x;
+		}
+		
+		
+		//r - double
+		//center - vec2
+		function Circle(c, r) {
+			this.invMass = 1 / (Math.PI * r * r);
+			this.draw = function() {drawCircle(this)}
+			this.angle = 0;
+			this.pos = c;
+			this.r = r;
+			this.velocity = new Vec2(0, 0);
+			this.angularVelocity = 0;
+			this.invInertia = 4 / (Math.PI * r * r * r * r);
+			this.applyImpulse = function(imp, r) {
+				velocity.add(imp, invMass);
+				angularVelocity += cross(r, imp)*invInertia;
+			}
+		}
+		
+
+		function Wall(p, n) {
+			this.p = p
+			this.n = n.normalize();
+			this.draw = function() {
+				drawWall(this);
+			}
+		}
+		
+		function Scene() {
+			this.walls = [];
+			this.bodies = [];
+			
+			this.step = function(dt) {
+				
+			}
+			
+			this.draw = function() {
+				for (var i = 0; i < walls.length; i++) {
+					walls[i].draw();
+				}
+				for (var i = 0; i < bodies.length; i++) {
+					bodies[i].draw();
+				}
+			}
+		}
+		
+		var canvas;
+		var scene;
+		var ctx;
+		var height;
+		var width;
+		var O;
+		
+		function init() {
+			canvas = document.getElementById('myCanvas');
+			width = canvas.width;
+			height = canvas.height;
+			ctx = canvas.getContext('2d');
+			O = new Vec2(width / 2, height / 2);
+			scene = new Scene();
+			scene.walls.push(new Wall(new Vec2(width / 2, 0), new Vec2(-1, 0)))
+			scene.walls.push(new Wall(new Vec2(-width / 2, 0), new Vec2(1, 0)))
+			scene.walls.push(new Wall(new Vec2(0, height / 2), new Vec2(0, -1)))
+			scene.walls.push(new Wall(new Vec2(0, -height / 2), new Vec2(0, 1)))
+		}
+		
+		function start() {
+			init();
+			scene.bodies.push(new Circle(new Vec2(0, 0), 140));
+			scene.draw();
+		}
+		
+		
+		
+		function drawCircle(circle) {
+		    var p = circle.pos;
+		    var r = circle.r;
+		    var a = circle.angle;
+		    ctx.beginPath();
+		    ctx.arc(O.x + p.x, O.y - p.y, r, 0, 2 * Math.PI);
+		    ctx.fillStyle = "red";
+		    ctx.fill();
+		  
+		    ctx.beginPath();
+		    ctx.moveTo(O.x + p.x, O.y - p.y);
+		    ctx.lineTo(O.x + p.x + r*Math.cos(a), O.y - p.y - r*Math.sin(a));
+		    ctx.stroke();
+		}
+		
+		function drawWall(wall) {
+			var p = wall.p;
+			var len = width;
+			var v = wall.n.copy().mult_i();
+			ctx.beginPath();
+			ctx.moveTo(O.x + p.x + v.x * len / 2, O.y - (p.y + v.y * len / 2));
+			ctx.lineTo(O.x + p.x - v.x * len / 2, O.y - (p.y - v.y * len / 2));
+			ctx.strokeStyle = '#0000ff';
+			ctx.lineWidth=3;
+			ctx.stroke();
+		}
+		
+		
+	</script>
+	  
+    <style>
+      body {
+        margin: 0px;
+        padding: 0px;
+      }
+    </style>
+  </head>
+  <body onload="start()">
+    <canvas id="myCanvas" width="1024" height="768"></canvas>
+  </body>
+</html>      

@@ -1,0 +1,439 @@
+<!DOCTYPE HTML>
+<html>
+  <head>
+	<script id="shader-fs" type="x-shader/x-fragment">
+		precision mediump float;
+		
+		uniform vec4 uColor;
+		
+		void main() {
+			gl_FragColor = uColor;
+		}
+	</script>
+	
+	<script id="shader-vs" type="x-shader/x-vertex">
+		attribute vec2 aPos;
+		
+		uniform mat3 uTransform;
+		uniform vec2 uResolution;
+		
+		void main() {
+			//pos.x \in [-w/2 , w/2]
+			vec2 pos = 2.0 * ((uTransform * vec3(aPos, 1.0)).xy / uResolution);
+			
+			//now pos \in [-1, 1]
+			gl_Position = vec4(pos, 0.0, 1.0);
+		}
+	</script>
+	  
+	<script>
+		var m3 = {
+			translation: function(tx, ty) {
+				return [
+					1, 0, 0,
+					0, 1, 0,
+					tx, ty, 1,
+				];
+			},
+			 
+			rotation: function(angleInRadians) {
+			var c = Math.cos(angleInRadians);
+			var s = Math.sin(angleInRadians);
+			return [
+					c,-s, 0,
+					s, c, 0,
+					0, 0, 1,
+				];
+			},
+			 
+			scaling: function(sx, sy) {
+				return [
+					sx, 0, 0,
+					0, sy, 0,
+					0, 0, 1,
+				];
+			},
+			multiply: function(a, b) {
+				var a00 = a[0 * 3 + 0];
+				var a01 = a[0 * 3 + 1];
+				var a02 = a[0 * 3 + 2];
+				var a10 = a[1 * 3 + 0];
+				var a11 = a[1 * 3 + 1];
+				var a12 = a[1 * 3 + 2];
+				var a20 = a[2 * 3 + 0];
+				var a21 = a[2 * 3 + 1];
+				var a22 = a[2 * 3 + 2];
+				var b00 = b[0 * 3 + 0];
+				var b01 = b[0 * 3 + 1];
+				var b02 = b[0 * 3 + 2];
+				var b10 = b[1 * 3 + 0];
+				var b11 = b[1 * 3 + 1];
+				var b12 = b[1 * 3 + 2];
+				var b20 = b[2 * 3 + 0];
+				var b21 = b[2 * 3 + 1];
+				var b22 = b[2 * 3 + 2];
+				return [
+				  b00 * a00 + b01 * a10 + b02 * a20,
+				  b00 * a01 + b01 * a11 + b02 * a21,
+				  b00 * a02 + b01 * a12 + b02 * a22,
+				  b10 * a00 + b11 * a10 + b12 * a20,
+				  b10 * a01 + b11 * a11 + b12 * a21,
+				  b10 * a02 + b11 * a12 + b12 * a22,
+				  b20 * a00 + b21 * a10 + b22 * a20,
+				  b20 * a01 + b21 * a11 + b22 * a21,
+				  b20 * a02 + b21 * a12 + b22 * a22,
+				];
+			}
+		};
+		
+		function Vec2(x, y) {
+			this.x = x;
+			this.y = y;
+			this.mult_i = function() {
+				var t = x;
+				this.x = -y;
+				this.y = t;
+				return this;
+			}
+			this.mult = function(a) {
+				this.x *= a;
+				this.y *= a;
+				return this;
+			}
+			this.normalize = function() {
+				var n = norm(this);
+				this.x /= n;
+				this.y /= n;
+				return this;
+			}
+			this.copy = function() {
+				return new Vec2(x, y);
+			}
+			this.add = function(v, a) {
+				this.x += v.x * a;
+				this.y += v.y * a;
+				return this;
+			}
+		}
+		
+		function sub(u, v) {
+			return new Vec2(u.x - v.x, u.y - v.y);
+		}
+		
+		function dot(u, v) {
+			return u.x * v.x + u.y * v.y;
+		}
+		
+		function norm2(u) {
+			return dot(u, u);
+		}
+		
+		function norm(u) {
+			return Math.sqrt(norm2(u));
+		}
+		
+		function cross(u, v) {
+			return u.x*v.y-u.y*v.x;
+		}
+		
+		
+		//r - double
+		//center - vec2
+		function Circle(c, r) {
+			this.invMass = 1 / (Math.PI * r * r);
+			this.draw = function() {drawCircle(this)}
+			this.angle = 0;
+			this.pos = c;
+			this.r = r;
+			this.velocity = new Vec2(0, 0);
+			this.angularVelocity = 0;
+			this.invInertia = 4 / (Math.PI * r * r * r * r);
+			this.applyImpulse = function(imp, r) {
+				velocity.add(imp, this.invMass);
+				angularVelocity += cross(r, imp)*this.invInertia;
+			}
+		}
+		
+
+		function Wall(p, n) {
+			this.p = p
+			this.n = n.normalize();
+			this.draw = function() {
+				drawWall(this);
+			}
+		}
+		
+		
+		function Scene() {
+			this.walls = [];
+			this.bodies = [];
+			var circleColor = [1, 0, 0, 1];
+			var lineColor = [0, 1, 1, 1]; 
+			var wallColor = [0, 0, 1, 1]; 
+			
+			this.step = function(dt) {
+				//collect collisions
+				
+				//apply gravity
+				for (var i = 0; i < this.bodies.length; i++) {
+					this.bodies[i].velocity.y -= 9.8 * dt
+				}
+				
+				//resolve collisions
+				
+				//integrate
+				for (var i = 0; i < this.bodies.length; i++) {
+					var b = this.bodies[i]
+					b.pos.add(b.velocity, dt);
+				}
+				
+			}
+			
+			this.draw = function() {
+				//draw all circles
+				gl.clearColor(0, 0, 0, 0);
+				gl.clear(gl.COLOR_BUFFER_BIT);
+				gl.bindBuffer(gl.ARRAY_BUFFER, circleBuffer);
+				gl.uniform4fv(shaderProgram.uColorLoc, circleColor);
+				
+				gl.vertexAttribPointer(shaderProgram.aPosLoc, circleBuffer.itemSize, gl.FLOAT, false, 0, 0);
+				
+				for (var i = 0; i < this.bodies.length; i++) {
+					var circle = this.bodies[i];
+					var scale = circle.r / unitRadius;
+					var translationMatrix = m3.translation(circle.pos.x, circle.pos.y);
+					var scaleMatrix = m3.scaling(scale, scale);
+					var matrix = m3.multiply(translationMatrix, scaleMatrix);
+	 
+					// Set the matrix.
+					gl.uniformMatrix3fv(shaderProgram.uTransformLoc, false, matrix);
+					gl.drawArrays(gl.TRIANGLE_FAN, 0, circleBuffer.numItems);
+				}
+				
+				//draw angle line on circles
+				gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
+				gl.uniform4fv(shaderProgram.uColorLoc, lineColor);
+				
+				gl.vertexAttribPointer(shaderProgram.aPosLoc, lineBuffer.itemSize, gl.FLOAT, false, 0, 0);
+				
+				for (var i = 0; i < this.bodies.length; i++) {
+					var circle = this.bodies[i];
+					var scale = circle.r / unitRadius;
+					var translationMatrix = m3.translation(circle.pos.x, circle.pos.y);
+					var scaleMatrix = m3.scaling(scale, scale);
+					var rotationMatrix = m3.rotation(circle.angle);
+					var matrix = m3.multiply(translationMatrix, m3.multiply(scaleMatrix, rotationMatrix));
+					
+					// Set the matrix.
+					gl.uniformMatrix3fv(shaderProgram.uTransformLoc, false, matrix);
+					gl.drawArrays(gl.LINES, 0, lineBuffer.numItems);
+				}
+				
+				//draw walls
+				gl.bindBuffer(gl.ARRAY_BUFFER, wallsBuffer);
+				gl.uniform4fv(shaderProgram.uColorLoc, wallColor);
+				
+				gl.vertexAttribPointer(shaderProgram.aPosLoc, wallsBuffer.itemSize, gl.FLOAT, false, 0, 0);
+				
+				var idMatrix = m3.rotation(0);
+				gl.uniformMatrix3fv(shaderProgram.uTransformLoc, false, idMatrix);
+				gl.drawArrays(gl.LINE_LOOP, 0, wallsBuffer.numItems);
+			}
+		}
+		
+		var scene;
+		var gl;
+		var height;
+		var width;
+		var dt = 1/20;
+		var frames = 0;
+		var time;
+		
+		function initGL(canvas) {
+			try {
+				gl = canvas.getContext("experimental-webgl");
+				gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+			} catch (e) {}
+			if (!gl) {
+				alert("could not init webgl");
+			}
+		}
+		
+		var shaderProgram;
+		
+		function initShaders() {
+			var fragmentShader = getShader(gl, "shader-fs");
+			var vertexShader = getShader(gl, "shader-vs");
+			
+			shaderProgram = gl.createProgram();
+			gl.attachShader(shaderProgram, vertexShader);
+			gl.attachShader(shaderProgram, fragmentShader);
+			gl.linkProgram(shaderProgram);
+
+			if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+				alert("Could not initialise shaders");
+			}
+
+			gl.useProgram(shaderProgram);
+
+			shaderProgram.aPosLoc = gl.getAttribLocation(shaderProgram, "aPos");
+			gl.enableVertexAttribArray(shaderProgram.aPosLoc);
+
+			shaderProgram.uTransformLoc = gl.getUniformLocation(shaderProgram, "uTransform");
+			shaderProgram.uColorLoc = gl.getUniformLocation(shaderProgram, "uColor");
+			shaderProgram.uResolutionLoc = gl.getUniformLocation(shaderProgram, "uResolution");
+			gl.uniform2fv(shaderProgram.uResolutionLoc, [width, height]);
+		}
+		
+		function getShader ( gl, id ){
+			var shaderScript = document.getElementById ( id );
+			var str = "";
+			var k = shaderScript.firstChild;
+			while ( k ){
+				if ( k.nodeType == 3 ) str += k.textContent;
+				k = k.nextSibling;
+			}
+			var shader;
+			if ( shaderScript.type == "x-shader/x-fragment" )
+			   shader = gl.createShader ( gl.FRAGMENT_SHADER );
+			else if ( shaderScript.type == "x-shader/x-vertex" )
+			   shader = gl.createShader(gl.VERTEX_SHADER);
+			else return null;
+			gl.shaderSource(shader, str);
+			gl.compileShader(shader);
+			if (gl.getShaderParameter(shader, gl.COMPILE_STATUS) == 0)
+				alert(gl.getShaderInfoLog(shader));
+			return shader;
+		}
+		
+		var circleBuffer;
+		var unitRadius = 25; //25 px
+		var lineBuffer;
+		var wallsBuffer;
+		
+		function initBuffers() {
+			circleBuffer = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER, circleBuffer);
+			var vertices = [];
+			var count = 128;
+			for (var i = 0; i < count - 1; i++) {
+				var angle = 2 * Math.PI / count * i;
+				vertices.push(Math.cos(angle) * unitRadius);
+				vertices.push(Math.sin(angle) * unitRadius);
+			}
+			
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+			circleBuffer.itemSize = 2;
+			circleBuffer.numItems = count - 1;
+			
+			
+			
+			lineBuffer = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
+			vertices = [0.0, 0.0, 
+							unitRadius, 0.0];
+			
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+			lineBuffer.itemSize = 2;
+			lineBuffer.numItems = 2;
+			
+			
+			wallsBuffer = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER, wallsBuffer);
+			vertices = [-width/2, -height/2,
+						width/2, -height/2,
+						width/2, height/2,
+						-width/2, height/2]
+						
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+			wallsBuffer.itemSize = 2;
+			wallsBuffer.numItems = 4;
+		}
+		
+		function init() {
+			var canvas = document.getElementById('myCanvas');
+			width = canvas.width;
+			height = canvas.height;
+			
+			initGL(canvas);
+			initShaders();
+			initBuffers();
+			
+			
+			scene = new Scene();
+			scene.walls.push(new Wall(new Vec2(width / 2, 0), new Vec2(-1, 0)))
+			scene.walls.push(new Wall(new Vec2(-width / 2, 0), new Vec2(1, 0)))
+			scene.walls.push(new Wall(new Vec2(0, height / 2), new Vec2(0, -1)))
+			scene.walls.push(new Wall(new Vec2(0, -height / 2), new Vec2(0, 1)))
+			setInterval(fr, 500);
+			time = new Date().getTime();
+		
+		}
+		
+		function start() {
+			init();
+			scene.bodies.push(new Circle(new Vec2(0, 0), 25));
+			scene.bodies.push(new Circle(new Vec2(-100, 100), 20));
+			animate();
+		}
+		
+		function animate() {
+			scene.step(dt);
+			scene.draw();
+			frames++;
+			requestAnimationFrame(animate);
+		}
+		
+		function fr(){
+			var ti = new Date().getTime();
+			var fps = Math.round(1000*frames/(ti - time));
+			document.getElementById("framerate").value = fps;
+			frames = 0;  time = ti;
+		}
+		
+		
+		
+		function drawCircle(circle) {
+		    var p = circle.pos;
+		    var r = circle.r;
+		    var a = circle.angle;
+		    ctx.beginPath();
+		    ctx.arc(O.x + p.x, O.y - p.y, r, 0, 2 * Math.PI);
+		    ctx.fillStyle = "red";
+		    ctx.fill();
+		  
+		    ctx.beginPath();
+		    ctx.moveTo(O.x + p.x, O.y - p.y);
+		    ctx.lineTo(O.x + p.x + r*Math.cos(a), O.y - p.y - r*Math.sin(a));
+		    ctx.strokeStyle = '#000000';
+			ctx.lineWidth=1;
+		    ctx.stroke();
+		}
+		
+		function drawWall(wall) {
+			var p = wall.p;
+			var len = width;
+			var v = wall.n.copy().mult_i();
+			ctx.beginPath();
+			ctx.moveTo(O.x + p.x + v.x * len / 2, O.y - (p.y + v.y * len / 2));
+			ctx.lineTo(O.x + p.x - v.x * len / 2, O.y - (p.y - v.y * len / 2));
+			ctx.strokeStyle = '#0000ff';
+			ctx.lineWidth=3;
+			ctx.stroke();
+		}
+		
+		
+	</script>
+	  
+    <style>
+      body {
+        margin: 0px;
+        padding: 0px;
+      }
+    </style>
+  </head>
+  <body onload="start()">
+    <canvas id="myCanvas" width="1024" height="768"></canvas>
+    framerate:<input size="2" id="framerate">fps
+  </body>
+</html>      
