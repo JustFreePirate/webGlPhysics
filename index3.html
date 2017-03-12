@@ -167,6 +167,7 @@
 				this.velocity.add(imp, this.invMass);
 				this.angularVelocity += cross(r, imp)*this.invInertia;
 			}
+			this.possibleCollisions = [];
 		}
 		
 		function Wall() {
@@ -224,7 +225,7 @@
 				Pn = Math.max(PnOld + dPn, 0);
 				dPn = Pn - PnOld;
 				
-				velocityChange += Math.abs(dPn / massNormal);
+				var velocityChange = Math.abs(dPn / massNormal);
 				P.setMul(normal, dPn);
 
 				b.applyImpulse(P, rb);
@@ -242,15 +243,128 @@
 				Pt = clamp(PtOld + dPt, -maxPt, maxPt);
 				dPt = Pt - PtOld;
 				
-				var velocityChange = Math.abs(dPt / massTangent);
+				velocityChange += Math.abs(dPt / massTangent);
 				P.setMul(tangent, dPt);
 
 				b.applyImpulse(P, rb);
 				a.applyImpulse(P.mul(-1), ra);
 				
+				return velocityChange;
+			}
+		}
+		
+		var AXIS_X = 0;
+		var AXIS_Y = 1;
+		
+		function removeFromArray(array, elem) {
+			var index = array.indexOf(elem);
+			if (index > -1) {
+				array.splice(index, 1);
+			}
+		}
+		
+		function BroadPhaseSAP() {
+			var axisX = [];
+			var axisY = [];
+			
+			function isOverlapAABB(a, b) {
+				if (a.pos.x + a.r < b.pos.x - b.r || b.pos.x + b.r < a.pos.x - a.r) {
+					return false;
+				}
+				if (a.pos.y + a.r < b.pos.y - b.r || b.pos.y + b.r < a.pos.y - a.r) {
+					return false;
+				}
+				return true;
 			}
 			
+			function removeCollision(a, b) {
+				removeFromArray(a.possibleCollisions, b);
+				removeFromArray(b.possibleCollisions, a);
+			}
 			
+			function addCollision(b1, b2) {
+				if (b1 === b2) {
+					console.log("SAP illigal state");
+					return;
+				}
+				
+				var possibleCollisionsBody1 = b1.possibleCollisions;
+				var possibleCollisionsBody2 = b2.possibleCollisions;
+				//check for already possible collision
+				if (possibleCollisionsBody1.length <= possibleCollisionsBody2.length) {
+				  for (var i = 0; i < possibleCollisionsBody1.length; i++) {
+					if (possibleCollisionsBody1[i] === b2) {
+					  return;
+					}
+				  }
+				} else {
+				  for (var i = 0; i < possibleCollisionsBody2.length; i++) {
+					if (possibleCollisionsBody2[i] === b1) {
+					  return;
+					}
+				  }
+				}
+				
+				possibleCollisionsBody1.push(b2);
+			}
+			
+			function sort(axis) {
+				for (var i = 1; i < axis.length; i++) {
+				  var key = axis[i];
+				  var keyValue = key.getValue();
+
+				  var j = i - 1;
+				  while (j >= 0 && axis[j].getValue() > keyValue) {
+					var swapPoint = axis[j];
+
+					if (key.isBegin && !swapPoint.isBegin) {
+					  if (isOverlapAABB(key.body, swapPoint.body)) {
+						addCollision(key.body, swapPoint.body);
+					  }
+					} else if (!key.isBegin && swapPoint.isBegin) {
+					  removeCollision(key.body, swapPoint.body);
+					}
+
+					axis[j + 1] = swapPoint;
+					j--;
+				  }
+				  axis[j + 1] = key;
+				}
+			}
+			
+			this.addBody = function(b) {
+				axisX.push(new EndPoint(b, AXIS_X, true));
+				axisX.push(new EndPoint(b, AXIS_X, false));
+				axisY.push(new EndPoint(b, AXIS_Y, true));
+				axisY.push(new EndPoint(b, AXIS_Y, false));
+			}
+			
+			this.update = function() {
+				sort(axisX);
+				sort(axisY);
+			}
+			
+			function EndPoint(b_, axis_, begin_) {
+				this.body = b_;
+				this.axis = axis_;
+				this.isBegin = begin_;
+				
+				this.getValue = function() {
+					if (this.isBegin) {
+						if (this.axis === AXIS_X) {
+						  return this.body.pos.x - this.body.r; //body.shape.aabb.a.x;
+						} else {
+						  return this.body.pos.y - this.body.r;
+						}
+					} else {
+						if (this.axis === AXIS_X) {
+						  return this.body.pos.x + this.body.r;
+						} else {
+						  return this.body.pos.y + this.body.r;
+						}
+					}
+				}
+			}
 		}
 		
 		var wall = new Wall();
@@ -297,6 +411,7 @@
 		function Scene() {
 			var bodies = [];
 			var collisions = [];
+			var broadPhaseSAP = new BroadPhaseSAP();
 			this.gravityG = 80;
 			this.iterationsCount = 30;
 			var circleColor = [1, 0, 0, 1];
@@ -305,7 +420,7 @@
 			
 			this.add = function(b) {
 				bodies.push(b);
-				b.index = bodies.length - 1;
+				broadPhaseSAP.addBody(b);
 			}
 			
 			this.step = function(dt) {
@@ -320,9 +435,13 @@
 					}
 				}
 				
+				broadPhaseSAP.update();
+				//broad phase grid
 				for (var i = 0; i < bodies.length; i++) {
-					for (var j = i+1; j < bodies.length; j++) {
-						var col = getCollisionCircles(bodies[i], bodies[j]);
+					var b1 = bodies[i];
+					for (var j = 0; j < b1.possibleCollisions.length; j++) {
+						var b2 = b1.possibleCollisions[j];
+						var col = getCollisionCircles(b1, b2);
 						if (col !== null) {
 							collisions.push(col);
 						}
@@ -340,10 +459,14 @@
 					collisions[i].init();
 				}
 				
+				//resolve collisions
 				for (var it = 0; it < this.iterationsCount; it++) {
-					//resolve collisions
+					var vel = 0;
 					for (var i = 0; i < collisions.length; i++) {
-						collisions[i].resolve();
+						vel += collisions[i].resolve();
+					}
+					if (vel < 1.0 * bodies.length) {
+						break;
 					}
 				}
 				
@@ -540,9 +663,9 @@
 			
 			
 			//scene.bodies.push(new Circle(new Vec2(-100, 100), 20));
-			for (var i = 0; i < 150; i++) {
+			for (var i = 0; i < 250; i++) {
 				c = new Circle(new Vec2(Math.random()*width - width/2, Math.random()*height - height/2), 0*Math.random()*15 + 20);
-				c.restitution = 0.5;
+				//c.restitution = 0.5;
 				//c.velocity.x = Math.random()*50 - 25;
 				//c.velocity.y = Math.random()*50 - 25;
 				
