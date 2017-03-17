@@ -66,7 +66,7 @@ void main(void) {
   varying vec2 vTexCoord;
   
   float cross(vec2 u, vec2 v) {
-    return u.x*v.y-u.y*v.x;
+    return u.x * v.y - u.y * v.x;
   }
   
   float signum(float x) {
@@ -96,7 +96,7 @@ void main(void) {
     
     //apply
     vel += imp * invMass;
-    ang += cross(r, imp);
+    //ang += cross(r, imp);
   }
   
   bool processApply(float coo) {
@@ -122,7 +122,7 @@ void main(void) {
    ang = velFull.z;
    
    
-   
+   /*
    float coo = b1.z;
    if (coo == 0.0) {
      gl_FragColor = vec4(vel, ang, 0.0);
@@ -139,18 +139,18 @@ void main(void) {
     }
     vel += imp * invMass;
     ang += cross(r, imp);
-   /*
+    */
+   
    //APPLY IMPULSE-->
    //1
    if (!processApply(b1.z)) {
      gl_FragColor = vec4(vel, ang, 0.0);
      return;
    }
-    
+
    //2
    if (!processApply(b1.w)) {
      gl_FragColor = vec4(vel, ang, 0.0);
-     gl_FragColor = vec4(5,6,7,8);
      return;
    }
    
@@ -198,9 +198,8 @@ void main(void) {
    
    //10
    processApply(b3.w);
-   */
    
-   gl_FragColor = vec4(imp, 0, 0.0);
+   gl_FragColor = vec4(vel, ang, 0);
    //gl_FragColor = b1;
 }
 </script>
@@ -270,27 +269,27 @@ void main(void) {
    vec2 bVel = bFullVel.rg;
    float bAng = bFullVel.b;
    
-   vec4 imp = texture2D(uImpTexture, vTexCoord);
-   float Pn = imp.r;
-   float Pt = imp.g;
+   vec2 imp = texture2D(uImpTexture, vTexCoord).xy;
+   //float Pn = dot(imp, normal);
+   //float Pt = dot(imp, tangent);
    //Init section <--
    
    //Normal
    //calc rv
    //rv  = bVel + bAng x rb - aVel - aAng x ra
-   vec2 rv = bVel + cross(bAng, rb) - aVel - cross(aAng, ra);
+   vec2 rv = bVel - aVel;// + cross(bAng, rb) - cross(aAng, ra);
    
    float rvAlongNormal = dot(rv, normal);
    float dPn = massNormal * (-rvAlongNormal + bias);
-   Pn = max(Pn + dPn, 0.0);
+   dPn = max(dPn, 0.0);
    
    //Tangent
-   float maxPt = friction * Pn;
-   float rvAlongTangent = dot(rv, tangent);
-   float dPt = massTangent * (-rvAlongTangent);
-   Pt = clamp(Pt + dPt, -maxPt, maxPt);
+   //float maxPt = friction * Pn;
+   //float rvAlongTangent = dot(rv, tangent);
+   //float dPt = massTangent * (-rvAlongTangent);
+   //Pt = clamp(Pt + dPt, -maxPt, maxPt);
    
-   vec2 fullImp = normal * Pn + tangent * Pt;
+   vec2 fullImp = imp + normal * dPn;// + tangent * Pt;
    
    gl_FragColor = vec4(fullImp, 0, 0); 
 }
@@ -590,19 +589,19 @@ void main(void) {
 				var possibleCollisionsBody1 = b1.possibleCollisions;
 				var possibleCollisionsBody2 = b2.possibleCollisions;
 				//check for already possible collision
-				if (possibleCollisionsBody1.length <= possibleCollisionsBody2.length) {
-				  for (var i = 0; i < possibleCollisionsBody1.length; i++) {
-					  if (possibleCollisionsBody1[i] === b2) {
-					    return;
-					  }
-				  }
-				} else {
-				  for (var i = 0; i < possibleCollisionsBody2.length; i++) {
-            if (possibleCollisionsBody2[i] === b1) {
-              return;
-            }
-				  }
-				}
+      
+        for (var i = 0; i < possibleCollisionsBody1.length; i++) {
+          if (possibleCollisionsBody1[i] === b2) {
+            return;
+          }
+        }
+				
+        for (var i = 0; i < possibleCollisionsBody2.length; i++) {
+          if (possibleCollisionsBody2[i] === b1) {
+            return;
+          }
+        }
+				
 				
 				possibleCollisionsBody1.push(b2);
 			}
@@ -742,7 +741,7 @@ void main(void) {
 			var collisions = [];
 			var broadPhaseSAP = new BroadPhaseSAP();
 			this.gravityG = 80;
-			this.iterationsCount = 30;
+			this.iterationsCount = 20;
 			var circleColor = [1, 0, 0, 1];
 			var lineColor = [0, 1, 1, 1]; 
 			var wallColor = [0, 0, 1, 1]; 
@@ -753,7 +752,8 @@ void main(void) {
 				broadPhaseSAP.addBody(b);
 			}
       
-      this.add(wall);
+      bodies.push(wall);
+      wall.index = 0;
 			
 			this.step = function(dt) {
 				//collect collisions
@@ -836,7 +836,7 @@ void main(void) {
 			this.draw = function() {
 				//draw all circles
         gl.useProgram(prog_show);
-        gl.viewport(0,0,width, height);
+        gl.viewport(0,0, width, height);
 				gl.clearColor(0, 0, 0, 0);
 				gl.clear(gl.COLOR_BUFFER_BIT);
 				gl.bindBuffer(gl.ARRAY_BUFFER, circleBuffer);
@@ -1100,9 +1100,11 @@ void main(void) {
     
     
     function processIteration(n, bodiesCount) {
+      
       gl.bindBuffer(gl.ARRAY_BUFFER, collBuffer);
       gl.vertexAttribPointer(prog_resolve.aPosLoc, 2, gl.FLOAT, gl.FALSE, 16, 0);
       gl.vertexAttribPointer(prog_resolve.aTexLoc, 2, gl.FLOAT, gl.FALSE, 16, 8);
+      
       
       gl.useProgram(prog_resolve);
       gl.viewport(0, 0, n, 1);
@@ -1110,8 +1112,19 @@ void main(void) {
       gl.uniform1i(prog_resolve.sampCollLoc, collTextureUnit);
       gl.uniform1i(prog_resolve.sampVelLoc, curVelTextureUnit);
       gl.uniform1i(prog_resolve.sampImpLoc, imp0TextureUnit); //0 imp   !should be!
-      gl.bindFramebuffer(gl.FRAMEBUFFER, FBO_IMP1); //1 imp    !different!
+      gl.bindFramebuffer(gl.FRAMEBUFFER, FBO_IMP1); //1 imp    !different! 
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      
+      /*
+      gl.readPixels(0, 0, n, 1, gl.RGBA, gl.FLOAT, out);
+      var outlog = []
+        for (var i = 0; i < n; i++) {
+          outlog.push(out[i*4]);
+          outlog.push(out[i*4+1]);
+          outlog.push(out[i*4+2]);
+          outlog.push(out[i*4+3]);
+        }
+      console.log(outlog);*/
       
       
       gl.useProgram(prog_apply);
@@ -1124,6 +1137,17 @@ void main(void) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, FBO_VEL); //out vel
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       
+      /*
+      gl.readPixels(0, 0, bodiesCount, 1, gl.RGBA, gl.FLOAT, out);
+      outlog = []
+        for (var i = 0; i < bodiesCount; i++) {
+          outlog.push(out[i*4]);
+          outlog.push(out[i*4+1]);
+          outlog.push(out[i*4+2]);
+          outlog.push(out[i*4+3]);
+        }
+      console.log(outlog);*/
+      
       
       gl.useProgram(prog_resolve);
       gl.viewport(0, 0, n, 1);
@@ -1135,6 +1159,18 @@ void main(void) {
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       
       
+      /*
+      gl.readPixels(0, 0, n, 1, gl.RGBA, gl.FLOAT, out);
+      outlog = []
+        for (var i = 0; i < n; i++) {
+          outlog.push(out[i*4]);
+          outlog.push(out[i*4+1]);
+          outlog.push(out[i*4+2]);
+          outlog.push(out[i*4+3]);
+        }
+      console.log(outlog);*/
+      
+      
       
       gl.useProgram(prog_apply);
       gl.viewport(0, 0, bodiesCount, 1);
@@ -1142,11 +1178,26 @@ void main(void) {
       gl.uniform1i(prog_apply.sampCollLoc, collTextureUnit);
       gl.uniform1i(prog_apply.sampInitVelLoc, initVelTextureUnit);
       gl.uniform1i(prog_apply.sampBodyTexture, bodyTextureUnit);
-      gl.uniform1i(prog_apply.sampImpLoc, imp0TextureUnit); //1 imp
+      gl.uniform1i(prog_apply.sampImpLoc, imp0TextureUnit); //0 imp
       gl.bindFramebuffer(gl.FRAMEBUFFER, FBO_VEL); //out vel
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      
+      
+      /*
+      gl.readPixels(0, 0, bodiesCount, 1, gl.RGBA, gl.FLOAT, out);
+      outlog = []
+        for (var i = 0; i < bodiesCount; i++) {
+          outlog.push(out[i*4]);
+          outlog.push(out[i*4+1]);
+          outlog.push(out[i*4+2]);
+          outlog.push(out[i*4+3]);
+        }
+      console.log(outlog);
+      */
+      
     }
     
+    var debugIter = 0
     var out = new Float32Array(4*maxBodiesCount);
     function resolveOnGPU(collisions, bodies, iterations) {
       var n = collisions.length;
@@ -1155,34 +1206,29 @@ void main(void) {
       if (n > 0) {
         initData(collisions, bodies);
         
-        for (var i = 0; i < iterations; i++) {
+        //console.log(collisions);
+        
+        for (var i = 0; i < 20; i++) {
           processIteration(n, bodiesCount);
         }
         
-        gl.bindFramebuffer(gl.FRAMEBUFFER, FBO_VEL);
+        
+        
         gl.readPixels(0, 0, bodiesCount, 1, gl.RGBA, gl.FLOAT, out);
         
-        /*
+        
         for (var i = 0; i < bodiesCount; i++) {
           var b = bodies[i];
           b.velocity.x = out[4*i];
           b.velocity.y = out[4*i+1];
           b.angularVelocity = out[4*i+2];
-        }*/
-        
-        var outlog = []
-        for (var i = 0; i < bodiesCount; i++) {
-          outlog.push(out[i*4]);
-          outlog.push(out[i*4+1]);
-          outlog.push(out[i*4+2]);
-          outlog.push(out[i*4+3]);
         }
-        console.log(outlog);
-        console.log(bodies[1].velocity);
-        //console.log(bodies[1].invMass);
-        //console.log(bodies[1].invInertia);
         
-        debugger;
+        
+        
+        //debugger;
+        
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       }
     }
     
@@ -1306,19 +1352,24 @@ void main(void) {
       
 			var c;
 			
-			/*
+			
 			//scene.bodies.push(new Circle(new Vec2(-100, 100), 20));
-			for (var i = 0; i < 1; i++) {
-				c = new Circle(new Vec2(Math.random()*width - width/2, Math.random()*height - height/2), 20);
+			for (var i = 0; i < 800; i++) {
+				c = new Circle(new Vec2(Math.random()*width - width/2, Math.random()*height - height/2), 15);
 				//c.restitution = 0.5;
 				//c.velocity.x = Math.random()*50 - 25;
 				//c.velocity.y = Math.random()*50 - 25;
 				
 				scene.add(c);
-			}*/
+			}
 			
+      /*
       c = new Circle(new Vec2(0, 0), 20);
       scene.add(c);
+      
+      c = new Circle(new Vec2(20, 60), 20);
+      scene.add(c);
+      */
 
 			animate();
 		}
@@ -1354,6 +1405,6 @@ void main(void) {
   <body onload="start()">
     <canvas id="myCanvas" width="1024" height="768"></canvas><br>
     framerate:<input size="2" id="framerate">fps
-    <input type="checkbox" id="gpu_flag" /> GPU <br><br><br>
+    <input type="checkbox" id="gpu_flag"  checked /> GPU <br><br><br>
   </body>
 </html>      
