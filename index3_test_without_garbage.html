@@ -1,0 +1,771 @@
+<!DOCTYPE HTML>
+<html>
+  <head>
+	<script id="shader-fs" type="x-shader/x-fragment">
+		precision mediump float;
+		
+		uniform vec4 uColor;
+		
+		void main() {
+			gl_FragColor = uColor;
+		}
+	</script>
+	
+	<script id="shader-vs" type="x-shader/x-vertex">
+		attribute vec2 aPos;
+		
+		uniform mat3 uTransform;
+		uniform vec2 uResolution;
+		
+		void main() {
+			//pos.x \in [-w/2 , w/2]
+			vec2 pos = 2.0 * ((uTransform * vec3(aPos, 1.0)).xy / uResolution);
+			
+			//now pos \in [-1, 1]
+			gl_Position = vec4(pos, 0.0, 1.0);
+		}
+	</script>
+	  
+	<script>
+		var m3 = {
+			translation: function(tx, ty) {
+				return [
+					1, 0, 0,
+					0, 1, 0,
+					tx, ty, 1,
+				];
+			},
+			 
+			rotation: function(angleInRadians) {
+			var c = Math.cos(angleInRadians);
+			var s = Math.sin(angleInRadians);
+			return [
+					c,-s, 0,
+					s, c, 0,
+					0, 0, 1,
+				];
+			},
+			 
+			scaling: function(sx, sy) {
+				return [
+					sx, 0, 0,
+					0, sy, 0,
+					0, 0, 1,
+				];
+			},
+			multiply: function(a, b) {
+				var a00 = a[0 * 3 + 0];
+				var a01 = a[0 * 3 + 1];
+				var a02 = a[0 * 3 + 2];
+				var a10 = a[1 * 3 + 0];
+				var a11 = a[1 * 3 + 1];
+				var a12 = a[1 * 3 + 2];
+				var a20 = a[2 * 3 + 0];
+				var a21 = a[2 * 3 + 1];
+				var a22 = a[2 * 3 + 2];
+				var b00 = b[0 * 3 + 0];
+				var b01 = b[0 * 3 + 1];
+				var b02 = b[0 * 3 + 2];
+				var b10 = b[1 * 3 + 0];
+				var b11 = b[1 * 3 + 1];
+				var b12 = b[1 * 3 + 2];
+				var b20 = b[2 * 3 + 0];
+				var b21 = b[2 * 3 + 1];
+				var b22 = b[2 * 3 + 2];
+				return [
+				  b00 * a00 + b01 * a10 + b02 * a20,
+				  b00 * a01 + b01 * a11 + b02 * a21,
+				  b00 * a02 + b01 * a12 + b02 * a22,
+				  b10 * a00 + b11 * a10 + b12 * a20,
+				  b10 * a01 + b11 * a11 + b12 * a21,
+				  b10 * a02 + b11 * a12 + b12 * a22,
+				  b20 * a00 + b21 * a10 + b22 * a20,
+				  b20 * a01 + b21 * a11 + b22 * a21,
+				  b20 * a02 + b21 * a12 + b22 * a22,
+				];
+			}
+		};
+		
+		function Vec2(x, y) {
+			this.x = x;
+			this.y = y;
+			this.mul = function(a) {
+				this.x *= a;
+				this.y *= a;
+				return this;
+			}
+			this.normalize = function() {
+				var n = norm(this);
+				this.x /= n;
+				this.y /= n;
+				return this;
+			}
+			this.copy = function() {
+				return new Vec2(x, y);
+			}
+      this.set = function(x, y) {
+        this.x = x;
+        this.y = y;
+        return this;
+      }
+      this.copyFrom = function(v) {
+        this.x = v.x;
+        this.y = v.y;
+        return this;
+      }
+			this.add = function(v, a) {
+				this.x += v.x * a;
+				this.y += v.y * a;
+				return this;
+			}
+			this.setSub = function(a, b) {
+				this.x = a.x - b.x;
+				this.y = a.y - b.y;
+				return this;
+			}
+      this.setAdd = function(a, b) {
+				this.x = a.x + b.x;
+				this.y = a.y + b.y;
+				return this;
+			}
+			this.setMul = function(v, a) {
+				this.x = v.x * a;
+				this.y = v.y * a;
+				return this;
+			}
+		}
+		
+		
+		function dot(u, v) {
+			return u.x * v.x + u.y * v.y;
+		}
+		
+		function norm2(u) {
+			return dot(u, u);
+		}
+		
+		function norm(u) {
+			return Math.sqrt(norm2(u));
+		}
+		
+		function cross(u, v) {
+			return u.x*v.y-u.y*v.x;
+		}
+		
+		function clamp(x, l, r) {
+			if (x < l) return l;
+			if (x > r) return r;
+			return x;
+		}
+		
+		
+		//r - double
+		//center - vec2
+		function Circle(c, r) {
+			this.invMass = 1 / (Math.PI * r * r);
+			this.angle = 0;
+			this.friction = 0.2;
+			this.pos = c;
+			this.restitution = 0;
+			this.r = r;
+			this.velocity = new Vec2(0, 0);
+			this.angularVelocity = 0;
+			this.invInertia = 4 / (Math.PI * r * r * r * r);
+			this.applyImpulse = function(imp, r) {
+				this.velocity.add(imp, this.invMass);
+				this.angularVelocity += cross(r, imp)*this.invInertia;
+			}
+			this.possibleCollisions = [];
+		}
+		
+		function Wall() {
+			this.friction = 0.2;
+			this.pos = new Vec2(0, 0);
+			this.invMass = 0;
+			this.restitution = 0;
+			this.velocity = new Vec2(0, 0);
+			this.angularVelocity = 0;
+			this.invInertia = 0;
+			this.applyImpulse = function() {}
+		}
+		
+		function Collision() {
+      
+      var a;
+      var b;
+      var point = new Vec2();
+      var penetration;
+			var penetrationAllowance = 1;
+			var massNormal = 0;
+			var bias = 0;
+			var Pn = 0;
+			var Pt = 0;
+			var friction = 0;
+			var ra = new Vec2();
+			var rb = new Vec2();
+			var rv = new Vec2();
+			var P = new Vec2();
+      var normal = new Vec2();
+			var tangent = new Vec2();
+      
+      this.create = function(a_, b_, point_, normal_, penetration_) {
+        a = a_;
+        b = b_;
+        point.copyFrom(point_);
+        normal.copyFrom(normal_);
+        penetration = penetration_;
+        tangent.x = -normal.y;
+        tangent.y = normal.x;
+      }
+			
+			function calcRv() {
+				//b.vel + b.angVel x rb - a.vel - a.angVel x ra
+				//angular x r = angular.norm * r * i = (-w * r.y, w * r.x)
+				rv.x = b.velocity.x + (-rb.y * b.angularVelocity) - a.velocity.x - (-ra.y * a.angularVelocity);
+				rv.y = b.velocity.y + (rb.x * b.angularVelocity) - a.velocity.y - (ra.x * a.angularVelocity);
+			}
+			
+			this.init = function() {
+				friction = Math.sqrt(a.friction * b.friction);
+				Pn = Pt = 0;
+				ra.setSub(point, a.pos);
+				rb.setSub(point, b.pos);
+				calcRv();
+				massNormal = 1 / (a.invMass + b.invMass);
+				var raLen = norm(ra);
+				var rbLen = norm(rb);
+				massTangent = 1 / (a.invMass + b.invMass + raLen*raLen * a.invInertia / 4 + rbLen*rbLen * b.invInertia / 4);
+				var e = Math.max(a.restitution, b.restitution);
+				bias = -e * dot(rv, normal) + 0.2 / dt * Math.max(penetration - penetrationAllowance, 0);
+			}
+			
+			this.resolve = function() {
+				//Normal
+				calcRv();
+				var rvAlongNormal = dot(rv, normal);
+				var dPn = massNormal * (-rvAlongNormal + bias);
+				
+				var PnOld = Pn;
+				Pn = Math.max(PnOld + dPn, 0);
+				dPn = Pn - PnOld;
+				
+				var velocityChange = Math.abs(dPn / massNormal);
+				P.setMul(normal, dPn);
+
+				b.applyImpulse(P, rb);
+				a.applyImpulse(P.mul(-1), ra);
+				
+				
+				//Tangent
+				calcRv();
+				var maxPt = friction * Pn;
+				
+				var rvAlongTangent = dot(rv, tangent);
+				var dPt = massTangent * (-rvAlongTangent);
+				
+				var PtOld = Pt;
+				Pt = clamp(PtOld + dPt, -maxPt, maxPt);
+				dPt = Pt - PtOld;
+				
+				velocityChange += Math.abs(dPt / massTangent);
+				P.setMul(tangent, dPt);
+
+				b.applyImpulse(P, rb);
+				a.applyImpulse(P.mul(-1), ra);
+				
+				return velocityChange;
+			}
+		}
+		
+		var AXIS_X = 0;
+		var AXIS_Y = 1;
+		
+		function removeFromArray(array, elem) {
+			var index = array.indexOf(elem);
+			if (index > -1) {
+				array.splice(index, 1);
+			}
+		}
+		
+		function BroadPhaseSAP() {
+			var axisX = [];
+			var axisY = [];
+			
+			function isOverlapAABB(a, b) {
+				if (a.pos.x + a.r < b.pos.x - b.r || b.pos.x + b.r < a.pos.x - a.r) {
+					return false;
+				}
+				if (a.pos.y + a.r < b.pos.y - b.r || b.pos.y + b.r < a.pos.y - a.r) {
+					return false;
+				}
+				return true;
+			}
+			
+			function removeCollision(a, b) {
+				removeFromArray(a.possibleCollisions, b);
+				removeFromArray(b.possibleCollisions, a);
+			}
+			
+			function addCollision(b1, b2) {
+				if (b1 === b2) {
+					console.log("SAP illigal state");
+					return;
+				}
+				
+				var possibleCollisionsBody1 = b1.possibleCollisions;
+				var possibleCollisionsBody2 = b2.possibleCollisions;
+				//check for already possible collision
+				if (possibleCollisionsBody1.length <= possibleCollisionsBody2.length) {
+				  for (var i = 0; i < possibleCollisionsBody1.length; i++) {
+					  if (possibleCollisionsBody1[i] === b2) {
+					    return;
+					  }
+				  }
+				} else {
+				  for (var i = 0; i < possibleCollisionsBody2.length; i++) {
+            if (possibleCollisionsBody2[i] === b1) {
+              return;
+            }
+				  }
+				}
+				
+				possibleCollisionsBody1.push(b2);
+			}
+			
+			function sort(axis) {
+				for (var i = 1; i < axis.length; i++) {
+				  var key = axis[i];
+				  var keyValue = key.getValue();
+
+				  var j = i - 1;
+				  while (j >= 0 && axis[j].getValue() > keyValue) {
+            var swapPoint = axis[j];
+
+            if (key.isBegin && !swapPoint.isBegin) {
+              if (isOverlapAABB(key.body, swapPoint.body)) {
+                addCollision(key.body, swapPoint.body);
+              }
+            } else if (!key.isBegin && swapPoint.isBegin) {
+                removeCollision(key.body, swapPoint.body);
+            }
+
+            axis[j + 1] = swapPoint;
+            j--;
+				  }
+				  axis[j + 1] = key;
+				}
+			}
+			
+			this.addBody = function(b) {
+				axisX.push(new EndPoint(b, AXIS_X, true));
+				axisX.push(new EndPoint(b, AXIS_X, false));
+				axisY.push(new EndPoint(b, AXIS_Y, true));
+				axisY.push(new EndPoint(b, AXIS_Y, false));
+			}
+			
+			this.update = function() {
+				sort(axisX);
+				sort(axisY);
+			}
+			
+			function EndPoint(b_, axis_, begin_) {
+				this.body = b_;
+				this.axis = axis_;
+				this.isBegin = begin_;
+				
+				this.getValue = function() {
+					if (this.isBegin) {
+						if (this.axis === AXIS_X) {
+						  return this.body.pos.x - this.body.r; //body.shape.aabb.a.x;
+						} else {
+						  return this.body.pos.y - this.body.r;
+						}
+					} else {
+						if (this.axis === AXIS_X) {
+						  return this.body.pos.x + this.body.r;
+						} else {
+						  return this.body.pos.y + this.body.r;
+						}
+					}
+				}
+			}
+		}
+		
+    var vec2Temp = new Vec2();
+    var vec2Temp2 = new Vec2();
+    var vec2Temp3 = new Vec2();
+    var collisionManager = new CollisionManager();
+    
+    function CollisionManager() {
+      var collisions = new Array(700);
+      var count = 0;
+      var newed = 700;
+      
+      for (var i = 0; i < newed; i++) {
+        collisions[i] = new Collision();
+      }
+      
+      this.createCollision = function(a, b, point, normal, penetration) {
+        if (count >= newed) {
+          collisions[newed++] = new Collision();
+        }
+        var col = collisions[count++];
+        col.create(a, b, point, normal, penetration);
+        return col;
+      }
+      
+      this.clear = function() {
+        count = 0;
+      }
+    }
+    
+		var wall = new Wall();
+		
+		function getCollisionWithWalls(b) {
+			var collisions = [];
+			if (b.pos.x - b.r <= -width/2) {
+				collisions.push(collisionManager.createCollision(b, wall, vec2Temp3.setAdd(b.pos, vec2Temp.set(-b.r, 0)), vec2Temp2.set(-1, 0), -width/2 - (b.pos.x - b.r)))
+			}
+			if (b.pos.x + b.r >= width/2) {
+				collisions.push(collisionManager.createCollision(b, wall, vec2Temp3.setAdd(b.pos, vec2Temp.set(b.r, 0)), vec2Temp2.set(1, 0), b.pos.x + b.r - width/2))
+			}
+			if (b.pos.y - b.r <= -height/2) {
+				collisions.push(collisionManager.createCollision(b, wall, vec2Temp3.setAdd(b.pos, vec2Temp.set(0, -b.r)), vec2Temp2.set(0, -1), -height/2 - (b.pos.y - b.r)))
+			}
+			if (b.pos.y + b.r >= height/2) {
+				collisions.push(collisionManager.createCollision(b, wall, vec2Temp3.setAdd(b.pos, vec2Temp.set(0, b.r)), vec2Temp2.set(0, 1), b.pos.y + b.r - height/2))
+			}
+			return collisions;
+		}
+		
+    
+    
+		function getCollisionCircles(a, b) {
+			var normal = vec2Temp.setSub(b.pos, a.pos);
+			var dist = norm(normal);
+			if (dist > a.r + b.r) {
+				return null;
+			}
+			
+			var penetration = a.r + b.r - dist;
+			var point = vec2Temp2;
+			if (dist < 0.000005) {
+				normal.x = 0
+				normal.y = 1;
+				point.copyFrom(a.pos);
+			} else {
+				normal.mul(1 / dist);
+				point.set(a.pos.x + normal.x * a.r, a.pos.y + normal.y * a.r);
+			}
+			
+			return collisionManager.createCollision(a, b, point, normal, penetration);
+		}
+		
+		
+		function Scene() {
+			var bodies = [];
+			var collisions = [];
+			var broadPhaseSAP = new BroadPhaseSAP();
+			this.gravityG = 80;
+			this.iterationsCount = 30;
+			var circleColor = [1, 0, 0, 1];
+			var lineColor = [0, 1, 1, 1]; 
+			var wallColor = [0, 0, 1, 1]; 
+			
+			this.add = function(b) {
+				bodies.push(b);
+				broadPhaseSAP.addBody(b);
+			}
+			
+			this.step = function(dt) {
+				//collect collisions
+        collisionManager.clear();
+				collisions.length = 0;
+				
+				//check for collision with walls
+				for (var i = 0; i < bodies.length; i++) {
+					var cols = getCollisionWithWalls(bodies[i]);
+					for (var j = 0; j < cols.length; j++) {
+						collisions.push(cols[j]);
+					}
+				}
+				
+				broadPhaseSAP.update();
+				//broad phase grid
+				for (var i = 0; i < bodies.length; i++) {
+					var b1 = bodies[i];
+					for (var j = 0; j < b1.possibleCollisions.length; j++) {
+						var b2 = b1.possibleCollisions[j];
+						var col = getCollisionCircles(b1, b2);
+						if (col !== null) {
+							collisions.push(col);
+						}
+					}
+				}
+				
+				
+				//apply gravity
+				for (var i = 0; i < bodies.length; i++) {
+					bodies[i].velocity.y -= this.gravityG * dt
+				}
+				
+				//init collisions
+				for (var i = 0; i < collisions.length; i++) {
+					collisions[i].init();
+				}
+				
+				//resolve collisions
+				for (var it = 0; it < this.iterationsCount; it++) {
+					var vel = 0;
+					for (var i = 0; i < collisions.length; i++) {
+						vel += collisions[i].resolve();
+					}
+					if (vel < 1.0 * bodies.length) {
+						break;
+					}
+				}
+				
+				//integrate
+				for (var i = 0; i < bodies.length; i++) {
+					var b = bodies[i]
+					b.pos.add(b.velocity, dt);
+					b.angle -= b.angularVelocity * dt;
+				}
+				
+			}
+			
+			this.draw = function() {
+				//draw all circles
+				gl.clearColor(0, 0, 0, 0);
+				gl.clear(gl.COLOR_BUFFER_BIT);
+				gl.bindBuffer(gl.ARRAY_BUFFER, circleBuffer);
+				gl.uniform4fv(shaderProgram.uColorLoc, circleColor);
+				
+				gl.vertexAttribPointer(shaderProgram.aPosLoc, circleBuffer.itemSize, gl.FLOAT, false, 0, 0);
+				
+				for (var i = 0; i < bodies.length; i++) {
+					var circle = bodies[i];
+					var scale = circle.r / unitRadius;
+					var translationMatrix = m3.translation(circle.pos.x, circle.pos.y);
+					var scaleMatrix = m3.scaling(scale, scale);
+					var matrix = m3.multiply(translationMatrix, scaleMatrix);
+	 
+					// Set the matrix.
+					gl.uniformMatrix3fv(shaderProgram.uTransformLoc, false, matrix);
+					gl.drawArrays(gl.TRIANGLE_FAN, 0, circleBuffer.numItems);
+				}
+				
+				//draw angle line on circles
+				gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
+				gl.uniform4fv(shaderProgram.uColorLoc, lineColor);
+				
+				gl.vertexAttribPointer(shaderProgram.aPosLoc, lineBuffer.itemSize, gl.FLOAT, false, 0, 0);
+				
+				for (var i = 0; i < bodies.length; i++) {
+					var circle = bodies[i];
+					var scale = circle.r / unitRadius;
+					var translationMatrix = m3.translation(circle.pos.x, circle.pos.y);
+					var scaleMatrix = m3.scaling(scale, scale);
+					var rotationMatrix = m3.rotation(circle.angle);
+					var matrix = m3.multiply(translationMatrix, m3.multiply(scaleMatrix, rotationMatrix));
+					
+					// Set the matrix.
+					gl.uniformMatrix3fv(shaderProgram.uTransformLoc, false, matrix);
+					gl.drawArrays(gl.LINES, 0, lineBuffer.numItems);
+				}
+				
+				//draw walls
+				gl.bindBuffer(gl.ARRAY_BUFFER, wallsBuffer);
+				gl.uniform4fv(shaderProgram.uColorLoc, wallColor);
+				
+				gl.vertexAttribPointer(shaderProgram.aPosLoc, wallsBuffer.itemSize, gl.FLOAT, false, 0, 0);
+				
+				var idMatrix = m3.rotation(0);
+				gl.uniformMatrix3fv(shaderProgram.uTransformLoc, false, idMatrix);
+				gl.drawArrays(gl.LINE_LOOP, 0, wallsBuffer.numItems);
+			}
+		}
+		
+		var scene;
+		var gl;
+		var height;
+		var width;
+		var dt = 1/20;
+		var frames = 0;
+		var time;
+		
+		function initGL(canvas) {
+			try {
+				gl = canvas.getContext("experimental-webgl");
+				gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+			} catch (e) {}
+			if (!gl) {
+				alert("could not init webgl");
+			}
+		}
+		
+		var shaderProgram;
+		
+		function initShaders() {
+			var fragmentShader = getShader(gl, "shader-fs");
+			var vertexShader = getShader(gl, "shader-vs");
+			
+			shaderProgram = gl.createProgram();
+			gl.attachShader(shaderProgram, vertexShader);
+			gl.attachShader(shaderProgram, fragmentShader);
+			gl.linkProgram(shaderProgram);
+
+			if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+				alert("Could not initialise shaders");
+			}
+
+			gl.useProgram(shaderProgram);
+
+			shaderProgram.aPosLoc = gl.getAttribLocation(shaderProgram, "aPos");
+			gl.enableVertexAttribArray(shaderProgram.aPosLoc);
+
+			shaderProgram.uTransformLoc = gl.getUniformLocation(shaderProgram, "uTransform");
+			shaderProgram.uColorLoc = gl.getUniformLocation(shaderProgram, "uColor");
+			shaderProgram.uResolutionLoc = gl.getUniformLocation(shaderProgram, "uResolution");
+			gl.uniform2fv(shaderProgram.uResolutionLoc, [width, height]);
+		}
+		
+		function getShader ( gl, id ){
+			var shaderScript = document.getElementById ( id );
+			var str = "";
+			var k = shaderScript.firstChild;
+			while ( k ){
+				if ( k.nodeType == 3 ) str += k.textContent;
+				k = k.nextSibling;
+			}
+			var shader;
+			if ( shaderScript.type == "x-shader/x-fragment" )
+			   shader = gl.createShader ( gl.FRAGMENT_SHADER );
+			else if ( shaderScript.type == "x-shader/x-vertex" )
+			   shader = gl.createShader(gl.VERTEX_SHADER);
+			else return null;
+			gl.shaderSource(shader, str);
+			gl.compileShader(shader);
+			if (gl.getShaderParameter(shader, gl.COMPILE_STATUS) == 0)
+				alert(gl.getShaderInfoLog(shader));
+			return shader;
+		}
+		
+		var circleBuffer;
+		var unitRadius = 25; //25 px
+		var lineBuffer;
+		var wallsBuffer;
+		
+		function initBuffers() {
+			circleBuffer = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER, circleBuffer);
+			var vertices = [];
+			var count = 32;
+			for (var i = 0; i < count; i++) {
+				var angle = 2 * Math.PI / count * i;
+				vertices.push(Math.cos(angle) * unitRadius);
+				vertices.push(Math.sin(angle) * unitRadius);
+			}
+			
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+			circleBuffer.itemSize = 2;
+			circleBuffer.numItems = count;
+			
+			
+			
+			lineBuffer = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
+			vertices = [0.0, 0.0, 
+							unitRadius, 0.0];
+			
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+			lineBuffer.itemSize = 2;
+			lineBuffer.numItems = 2;
+			
+			
+			wallsBuffer = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER, wallsBuffer);
+			vertices = [-width/2, -height/2,
+						width/2, -height/2,
+						width/2, height/2,
+						-width/2, height/2]
+						
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+			wallsBuffer.itemSize = 2;
+			wallsBuffer.numItems = 4;
+		}
+		
+		function init() {
+			var canvas = document.getElementById('myCanvas');
+			width = canvas.width;
+			height = canvas.height;
+			
+			initGL(canvas);
+			initShaders();
+			initBuffers();
+			
+			
+			scene = new Scene();
+	
+			setInterval(fr, 500);
+			time = new Date().getTime();
+		
+		}
+		
+		function start() {
+			init();
+			var c;
+			
+			
+			//scene.bodies.push(new Circle(new Vec2(-100, 100), 20));
+			for (var i = 0; i < 250; i++) {
+				c = new Circle(new Vec2(Math.random()*width - width/2, Math.random()*height - height/2), 0*Math.random()*15 + 20);
+				//c.restitution = 0.5;
+				//c.velocity.x = Math.random()*50 - 25;
+				//c.velocity.y = Math.random()*50 - 25;
+				
+				scene.add(c);
+			}
+			
+			c = new Circle(new Vec2(0, -200), 20)
+			scene.add(c);
+			
+			c = new Circle(new Vec2(-5, 250), 20)
+			scene.add(c);
+
+			animate();
+		}
+		
+		function animate() {
+			scene.step(dt);
+			scene.draw();
+			frames++;
+			requestAnimationFrame(animate);
+		}
+		
+		function fr(){
+			var ti = new Date().getTime();
+			var fps = Math.round(1000*frames/(ti - time));
+			document.getElementById("framerate").value = fps;
+			frames = 0;  time = ti;
+		}
+		
+	</script>
+	  
+    <script>
+      function hello() {
+        console.log("lel");
+      }
+    </script>
+    <style>
+      body {
+        margin: 0px;
+        padding: 0px;
+      }
+    </style>
+  </head>
+  <body onload="start()">
+    <canvas id="myCanvas" width="1024" height="768"></canvas>
+    framerate:<input size="2" id="framerate">fps
+  </body>
+</html>      

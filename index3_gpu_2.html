@@ -1,0 +1,1359 @@
+<!DOCTYPE HTML>
+<html>
+  <head>
+	<script id="shader-fs-show" type="x-shader/x-fragment">
+		precision mediump float;
+		
+		uniform vec4 uColor;
+		
+		void main() {
+			gl_FragColor = uColor;
+		}
+	</script>
+	
+	<script id="shader-vs-show" type="x-shader/x-vertex">
+		attribute vec2 aPos;
+		
+		uniform mat3 uTransform;
+		uniform vec2 uResolution;
+		
+		void main() {
+			//pos.x \in [-w/2 , w/2]
+			vec2 pos = 2.0 * ((uTransform * vec3(aPos, 1.0)).xy / uResolution);
+			
+			//now pos \in [-1, 1]
+			gl_Position = vec4(pos, 0.0, 1.0);
+		}
+	</script>
+  
+  <script id="shader-vs-collision" type="x-shader/x-vertex"> 
+  attribute vec2 aPos;
+  attribute vec2 aTexCoord;
+  varying   vec2 vTexCoord;
+void main(void) {
+   gl_Position = vec4(aPos, 0., 1.);
+   vTexCoord = aTexCoord;
+}
+</script> 
+
+<script id="shader-fs-collision-apply" type="x-shader/x-fragment"> 
+  precision highp float;
+  
+  //count = countOfCollision
+  uniform sampler2D uImpTexture; //impulses
+  
+  /*
+    body
+     (invMass, invI, colCoord, colCoord)
+     (colCoord, colCoord, colCoord, colCoord)
+     (colCoord, colCoord, colCoord, colCoord)
+     //maximum 10 collisions
+  */
+  uniform sampler2D uBodyTexture;
+  
+  /*
+    collision
+     (bodyA, bodyB, normal.x, normal.y)
+     (ra.x, ra.y, rb.x, rb.y)
+     (friction, bias, massNormal, massTangent)
+  */
+  uniform sampler2D uCollisionsTexture;
+  
+  uniform sampler2D uVelTexture; //initial vel
+  
+  uniform float uBodyPixelSize;
+  
+  varying vec2 vTexCoord;
+  
+  float cross(vec2 u, vec2 v) {
+    return u.x*v.y-u.y*v.x;
+  }
+  
+  float signum(float x) {
+    if (x > 0.0) {
+      return 1.0;
+    } else {
+      return -1.0;
+    }
+  }
+  
+  float invMass;
+  float invI;
+  float sign;
+  float ang;
+  vec2 vel;
+  vec2 colCoord = vec2(0, 0);
+  
+  
+  void applyImp() {
+    vec2 imp = texture2D(uImpTexture, colCoord).xy * sign;
+    vec2 r;
+    if (sign > 0.0) { 
+      r = texture2D(uCollisionsTexture, colCoord).zw; //rb
+    } else {
+      r = texture2D(uCollisionsTexture, colCoord).xy; //ra
+    }
+    
+    //apply
+    vel += imp * invMass;
+    ang += cross(r, imp);
+  }
+  
+  bool processApply(float coo) {
+    if (coo == 0.0) {
+      return false;
+    }
+    sign = signum(coo);
+    colCoord.x = sign * coo;
+    applyImp();
+    return true;
+  }
+  
+
+void main(void) {
+   vec4 b1 = texture2D(uBodyTexture, vTexCoord - vec2(uBodyPixelSize, 0));
+   vec4 b2 = texture2D(uBodyTexture, vTexCoord);
+   vec4 b3 = texture2D(uBodyTexture, vTexCoord + vec2(uBodyPixelSize, 0));
+   
+   invMass = b1.r;
+   invI = b1.g;
+   vec3 velFull = texture2D(uVelTexture, vTexCoord).rgb;
+   vel = velFull.xy;
+   ang = velFull.z;
+   
+   
+   
+   float coo = b1.z;
+   if (coo == 0.0) {
+     gl_FragColor = vec4(vel, ang, 0.0);
+     return;
+   }
+   sign = signum(coo);
+   colCoord.x = sign * coo;
+   vec2 imp = texture2D(uImpTexture, colCoord).xy * sign;
+   vec2 r;
+    if (sign > 0.0) { 
+      r = texture2D(uCollisionsTexture, colCoord).zw; //rb
+    } else {
+      r = texture2D(uCollisionsTexture, colCoord).xy; //ra
+    }
+    vel += imp * invMass;
+    ang += cross(r, imp);
+   /*
+   //APPLY IMPULSE-->
+   //1
+   if (!processApply(b1.z)) {
+     gl_FragColor = vec4(vel, ang, 0.0);
+     return;
+   }
+    
+   //2
+   if (!processApply(b1.w)) {
+     gl_FragColor = vec4(vel, ang, 0.0);
+     gl_FragColor = vec4(5,6,7,8);
+     return;
+   }
+   
+   //3
+   if (!processApply(b2.x)) {
+     gl_FragColor = vec4(vel, ang, 0.0);
+     return;
+   }
+   
+   //4
+   if (!processApply(b2.y)) {
+     gl_FragColor = vec4(vel, ang, 0.0);
+     return;
+   }
+   
+   //5
+   if (!processApply(b2.z)) {
+     gl_FragColor = vec4(vel, ang, 0.0);
+     return;
+   }
+   
+   //6
+   if (!processApply(b2.w)) {
+     gl_FragColor = vec4(vel, ang, 0.0);
+     return;
+   }
+   
+   //7
+   if (!processApply(b3.x)) {
+     gl_FragColor = vec4(vel, ang, 0.0);
+     return;
+   }
+   
+   //8
+   if (!processApply(b3.y)) {
+     gl_FragColor = vec4(vel, ang, 0.0);
+     return;
+   }
+   
+   //9
+   if (!processApply(b3.z)) {
+     gl_FragColor = vec4(vel, ang, 0.0);
+     return;
+   }
+   
+   //10
+   processApply(b3.w);
+   */
+   
+   gl_FragColor = vec4(imp, 0, 0.0);
+   //gl_FragColor = b1;
+}
+</script>
+
+
+
+
+
+
+
+
+<script id="shader-fs-collision-resolution" type="x-shader/x-fragment"> 
+  precision highp float;
+  
+  /*
+    collision
+     (bodyA, bodyB, normal.x, normal.y)
+     (ra.x, ra.y, rb.x, rb.y)
+     (friction, bias, massNormal, massTangent)
+  */
+  uniform sampler2D uCollisionsTexture;
+  
+  /*
+    body vel
+     (vel.x, vel.y, angVel, 0)
+  */
+  uniform sampler2D uVelTexture;
+  
+  /*
+    imp
+     (Pn, Pt, 0, 0)
+  */
+  uniform sampler2D uImpTexture;
+  
+  uniform float collPixelSize;
+  
+  varying vec2 vTexCoord;
+  
+  vec2 cross(float w, vec2 r) {
+    //ang x r = ang * r * i = (-w * r.y, w * r.x)
+    return vec2(-w * r.y, w * r.x);
+  }
+
+void main(void) {
+   
+   //Init section -->
+   vec4 col1 = texture2D(uCollisionsTexture, vTexCoord - vec2(collPixelSize, 0));
+   vec4 col2 = texture2D(uCollisionsTexture, vTexCoord);
+   vec4 col3 = texture2D(uCollisionsTexture, vTexCoord + vec2(collPixelSize, 0));
+   
+   float bodyA = col1.r;
+   float bodyB = col1.g;
+   vec2 normal = col1.ba;
+   vec2 tangent = vec2(-normal.y, normal.x);
+   vec2 ra = col2.rg;
+   vec2 rb = col2.ba;
+   float friction = col3.r;
+   float bias = col3.g;
+   float massNormal = col3.b;
+   float massTangent = col3.a;
+   
+   vec4 aFullVel = texture2D(uVelTexture, vec2(bodyA, 0.5));
+   vec4 bFullVel = texture2D(uVelTexture, vec2(bodyB, 0.5));
+   
+   vec2 aVel = aFullVel.rg;
+   float aAng = aFullVel.b;
+   vec2 bVel = bFullVel.rg;
+   float bAng = bFullVel.b;
+   
+   vec4 imp = texture2D(uImpTexture, vTexCoord);
+   float Pn = imp.r;
+   float Pt = imp.g;
+   //Init section <--
+   
+   //Normal
+   //calc rv
+   //rv  = bVel + bAng x rb - aVel - aAng x ra
+   vec2 rv = bVel + cross(bAng, rb) - aVel - cross(aAng, ra);
+   
+   float rvAlongNormal = dot(rv, normal);
+   float dPn = massNormal * (-rvAlongNormal + bias);
+   Pn = max(Pn + dPn, 0.0);
+   
+   //Tangent
+   float maxPt = friction * Pn;
+   float rvAlongTangent = dot(rv, tangent);
+   float dPt = massTangent * (-rvAlongTangent);
+   Pt = clamp(Pt + dPt, -maxPt, maxPt);
+   
+   vec2 fullImp = normal * Pn + tangent * Pt;
+   
+   gl_FragColor = vec4(fullImp, 0, 0); 
+}
+</script>
+  
+	  
+	<script>
+		var m3 = {
+			translation: function(tx, ty) {
+				return [
+					1, 0, 0,
+					0, 1, 0,
+					tx, ty, 1,
+				];
+			},
+			 
+			rotation: function(angleInRadians) {
+			var c = Math.cos(angleInRadians);
+			var s = Math.sin(angleInRadians);
+			return [
+					c,-s, 0,
+					s, c, 0,
+					0, 0, 1,
+				];
+			},
+			 
+			scaling: function(sx, sy) {
+				return [
+					sx, 0, 0,
+					0, sy, 0,
+					0, 0, 1,
+				];
+			},
+			multiply: function(a, b) {
+				var a00 = a[0 * 3 + 0];
+				var a01 = a[0 * 3 + 1];
+				var a02 = a[0 * 3 + 2];
+				var a10 = a[1 * 3 + 0];
+				var a11 = a[1 * 3 + 1];
+				var a12 = a[1 * 3 + 2];
+				var a20 = a[2 * 3 + 0];
+				var a21 = a[2 * 3 + 1];
+				var a22 = a[2 * 3 + 2];
+				var b00 = b[0 * 3 + 0];
+				var b01 = b[0 * 3 + 1];
+				var b02 = b[0 * 3 + 2];
+				var b10 = b[1 * 3 + 0];
+				var b11 = b[1 * 3 + 1];
+				var b12 = b[1 * 3 + 2];
+				var b20 = b[2 * 3 + 0];
+				var b21 = b[2 * 3 + 1];
+				var b22 = b[2 * 3 + 2];
+				return [
+				  b00 * a00 + b01 * a10 + b02 * a20,
+				  b00 * a01 + b01 * a11 + b02 * a21,
+				  b00 * a02 + b01 * a12 + b02 * a22,
+				  b10 * a00 + b11 * a10 + b12 * a20,
+				  b10 * a01 + b11 * a11 + b12 * a21,
+				  b10 * a02 + b11 * a12 + b12 * a22,
+				  b20 * a00 + b21 * a10 + b22 * a20,
+				  b20 * a01 + b21 * a11 + b22 * a21,
+				  b20 * a02 + b21 * a12 + b22 * a22,
+				];
+			}
+		};
+		
+		function Vec2(x, y) {
+			this.x = x;
+			this.y = y;
+			this.mul = function(a) {
+				this.x *= a;
+				this.y *= a;
+				return this;
+			}
+			this.normalize = function() {
+				var n = norm(this);
+				this.x /= n;
+				this.y /= n;
+				return this;
+			}
+			this.copy = function() {
+				return new Vec2(x, y);
+			}
+      this.set = function(x, y) {
+        this.x = x;
+        this.y = y;
+        return this;
+      }
+      this.copyFrom = function(v) {
+        this.x = v.x;
+        this.y = v.y;
+        return this;
+      }
+			this.add = function(v, a) {
+				this.x += v.x * a;
+				this.y += v.y * a;
+				return this;
+			}
+			this.setSub = function(a, b) {
+				this.x = a.x - b.x;
+				this.y = a.y - b.y;
+				return this;
+			}
+      this.setAdd = function(a, b) {
+				this.x = a.x + b.x;
+				this.y = a.y + b.y;
+				return this;
+			}
+			this.setMul = function(v, a) {
+				this.x = v.x * a;
+				this.y = v.y * a;
+				return this;
+			}
+		}
+		
+		
+		function dot(u, v) {
+			return u.x * v.x + u.y * v.y;
+		}
+		
+		function norm2(u) {
+			return dot(u, u);
+		}
+		
+		function norm(u) {
+			return Math.sqrt(norm2(u));
+		}
+		
+		function cross(u, v) {
+			return u.x*v.y-u.y*v.x;
+		}
+		
+		function clamp(x, l, r) {
+			if (x < l) return l;
+			if (x > r) return r;
+			return x;
+		}
+		
+		
+		//r - double
+		//center - vec2
+		function Circle(c, r) {
+      this.index;
+			this.invMass = 1 / (Math.PI * r * r);
+			this.angle = 0;
+			this.friction = 0.2;
+			this.pos = c;
+			this.restitution = 0;
+			this.r = r;
+			this.velocity = new Vec2(0, 0);
+			this.angularVelocity = 0;
+			this.invInertia = 4 / (Math.PI * r * r * r * r);
+			this.applyImpulse = function(imp, r) {
+				this.velocity.add(imp, this.invMass);
+				this.angularVelocity += cross(r, imp)*this.invInertia;
+			}
+			this.possibleCollisions = [];
+      this.collisions = [];
+		}
+		
+		function Wall() {
+      this.index;
+			this.friction = 0.2;
+			this.pos = new Vec2(0, 0);
+			this.invMass = 0;
+			this.restitution = 0;
+			this.velocity = new Vec2(0, 0);
+			this.angularVelocity = 0;
+			this.invInertia = 0;
+			this.applyImpulse = function() {}
+      this.collisions = [];
+		}
+		
+		function Collision() {
+      
+      this.a = undefined;
+      this.b = undefined;
+      var point = new Vec2();
+      var penetration;
+			var penetrationAllowance = 1;
+			var massNormal = 0;
+			this.bias = 0;
+			var Pn = 0;
+			var Pt = 0;
+			this.friction = 0;
+			this.ra = new Vec2();
+			this.rb = new Vec2();
+			var rv = new Vec2();
+			var P = new Vec2();
+      this.normal = new Vec2();
+			var tangent = new Vec2();
+      
+      this.create = function(a_, b_, point_, normal_, penetration_) {
+        this.a = a_;
+        this.b = b_;
+        point.copyFrom(point_);
+        this.normal.copyFrom(normal_);
+        penetration = penetration_;
+        tangent.x = -this.normal.y;
+        tangent.y = this.normal.x;
+      }
+			
+			this.calcRv = function() {
+				//b.vel + b.angVel x rb - a.vel - a.angVel x ra
+				//angular x r = angular.norm * r * i = (-w * r.y, w * r.x)
+				rv.x = this.b.velocity.x + (-this.rb.y * this.b.angularVelocity) - this.a.velocity.x - (-this.ra.y * this.a.angularVelocity);
+				rv.y = this.b.velocity.y + (this.rb.x * this.b.angularVelocity) - this.a.velocity.y - (this.ra.x * this.a.angularVelocity);
+			}
+			
+			this.init = function() {
+				this.friction = Math.sqrt(this.a.friction * this.b.friction);
+				Pn = Pt = 0;
+				this.ra.setSub(point, this.a.pos);
+				this.rb.setSub(point, this.b.pos);
+				this.calcRv();
+				this.massNormal = 1 / (this.a.invMass + this.b.invMass);
+				var raLen = norm(this.ra);
+				var rbLen = norm(this.rb);
+				this.massTangent = 1 / (this.a.invMass + this.b.invMass + raLen*raLen * this.a.invInertia / 4 + rbLen*rbLen * this.b.invInertia / 4);
+				var e = Math.max(this.a.restitution, this.b.restitution);
+				this.bias = -e * dot(rv, this.normal) + 0.2 / dt * Math.max(penetration - penetrationAllowance, 0);
+			}
+			
+			this.resolve = function() {
+				//Normal
+				this.calcRv();
+				var rvAlongNormal = dot(rv, this.normal);
+				var dPn = this.massNormal * (-rvAlongNormal + this.bias);
+				
+				var PnOld = Pn;
+				Pn = Math.max(PnOld + dPn, 0);
+				dPn = Pn - PnOld;
+				
+				var velocityChange = Math.abs(dPn / this.massNormal);
+				P.setMul(this.normal, dPn);
+
+				this.b.applyImpulse(P, this.rb);
+				this.a.applyImpulse(P.mul(-1), this.ra);
+				
+				
+				//Tangent
+				this.calcRv();
+				var maxPt = this.friction * Pn;
+				
+				var rvAlongTangent = dot(rv, tangent);
+				var dPt = this.massTangent * (-rvAlongTangent);
+				
+				var PtOld = Pt;
+				Pt = clamp(PtOld + dPt, -maxPt, maxPt);
+				dPt = Pt - PtOld;
+				
+				velocityChange += Math.abs(dPt / this.massTangent);
+				P.setMul(tangent, dPt);
+
+				this.b.applyImpulse(P, this.rb);
+				this.a.applyImpulse(P.mul(-1), this.ra);
+				
+				return velocityChange;
+			}
+		}
+		
+		var AXIS_X = 0;
+		var AXIS_Y = 1;
+		
+		function removeFromArray(array, elem) {
+			var index = array.indexOf(elem);
+			if (index > -1) {
+				array.splice(index, 1);
+			}
+		}
+		
+		function BroadPhaseSAP() {
+			var axisX = [];
+			var axisY = [];
+			
+			function isOverlapAABB(a, b) {
+				if (a.pos.x + a.r < b.pos.x - b.r || b.pos.x + b.r < a.pos.x - a.r) {
+					return false;
+				}
+				if (a.pos.y + a.r < b.pos.y - b.r || b.pos.y + b.r < a.pos.y - a.r) {
+					return false;
+				}
+				return true;
+			}
+			
+			function removeCollision(a, b) {
+				removeFromArray(a.possibleCollisions, b);
+				removeFromArray(b.possibleCollisions, a);
+			}
+			
+			function addCollision(b1, b2) {
+				if (b1 === b2) {
+					console.log("SAP illigal state");
+					return;
+				}
+				
+				var possibleCollisionsBody1 = b1.possibleCollisions;
+				var possibleCollisionsBody2 = b2.possibleCollisions;
+				//check for already possible collision
+				if (possibleCollisionsBody1.length <= possibleCollisionsBody2.length) {
+				  for (var i = 0; i < possibleCollisionsBody1.length; i++) {
+					  if (possibleCollisionsBody1[i] === b2) {
+					    return;
+					  }
+				  }
+				} else {
+				  for (var i = 0; i < possibleCollisionsBody2.length; i++) {
+            if (possibleCollisionsBody2[i] === b1) {
+              return;
+            }
+				  }
+				}
+				
+				possibleCollisionsBody1.push(b2);
+			}
+			
+			function sort(axis) {
+				for (var i = 1; i < axis.length; i++) {
+				  var key = axis[i];
+				  var keyValue = key.getValue();
+
+				  var j = i - 1;
+				  while (j >= 0 && axis[j].getValue() > keyValue) {
+            var swapPoint = axis[j];
+
+            if (key.isBegin && !swapPoint.isBegin) {
+              if (isOverlapAABB(key.body, swapPoint.body)) {
+                addCollision(key.body, swapPoint.body);
+              }
+            } else if (!key.isBegin && swapPoint.isBegin) {
+                removeCollision(key.body, swapPoint.body);
+            }
+
+            axis[j + 1] = swapPoint;
+            j--;
+				  }
+				  axis[j + 1] = key;
+				}
+			}
+			
+			this.addBody = function(b) {
+				axisX.push(new EndPoint(b, AXIS_X, true));
+				axisX.push(new EndPoint(b, AXIS_X, false));
+				axisY.push(new EndPoint(b, AXIS_Y, true));
+				axisY.push(new EndPoint(b, AXIS_Y, false));
+			}
+			
+			this.update = function() {
+				sort(axisX);
+				sort(axisY);
+			}
+			
+			function EndPoint(b_, axis_, begin_) {
+				this.body = b_;
+				this.axis = axis_;
+				this.isBegin = begin_;
+				
+				this.getValue = function() {
+					if (this.isBegin) {
+						if (this.axis === AXIS_X) {
+						  return this.body.pos.x - this.body.r; //body.shape.aabb.a.x;
+						} else {
+						  return this.body.pos.y - this.body.r;
+						}
+					} else {
+						if (this.axis === AXIS_X) {
+						  return this.body.pos.x + this.body.r;
+						} else {
+						  return this.body.pos.y + this.body.r;
+						}
+					}
+				}
+			}
+		}
+		
+    var vec2Temp = new Vec2();
+    var vec2Temp2 = new Vec2();
+    var vec2Temp3 = new Vec2();
+    var collisionManager = new CollisionManager();
+    
+    function CollisionManager() {
+      var collisions = new Array(700);
+      var count = 0;
+      var newed = 700;
+      
+      for (var i = 0; i < newed; i++) {
+        collisions[i] = new Collision();
+      }
+      
+      this.createCollision = function(a, b, point, normal, penetration) {
+        if (count >= newed) {
+          collisions[newed++] = new Collision();
+        }
+        var col = collisions[count++];
+        col.create(a, b, point, normal, penetration);
+        return col;
+      }
+      
+      this.clear = function() {
+        count = 0;
+      }
+    }
+    
+		var wall = new Wall();
+		
+		function getCollisionWithWalls(b) {
+			var collisions = [];
+			if (b.pos.x - b.r <= -width/2) {
+				collisions.push(collisionManager.createCollision(b, wall, vec2Temp3.setAdd(b.pos, vec2Temp.set(-b.r, 0)), vec2Temp2.set(-1, 0), -width/2 - (b.pos.x - b.r)))
+			}
+			if (b.pos.x + b.r >= width/2) {
+				collisions.push(collisionManager.createCollision(b, wall, vec2Temp3.setAdd(b.pos, vec2Temp.set(b.r, 0)), vec2Temp2.set(1, 0), b.pos.x + b.r - width/2))
+			}
+			if (b.pos.y - b.r <= -height/2) {
+				collisions.push(collisionManager.createCollision(b, wall, vec2Temp3.setAdd(b.pos, vec2Temp.set(0, -b.r)), vec2Temp2.set(0, -1), -height/2 - (b.pos.y - b.r)))
+			}
+			if (b.pos.y + b.r >= height/2) {
+				collisions.push(collisionManager.createCollision(b, wall, vec2Temp3.setAdd(b.pos, vec2Temp.set(0, b.r)), vec2Temp2.set(0, 1), b.pos.y + b.r - height/2))
+			}
+			return collisions;
+		}
+		
+    
+    
+		function getCollisionCircles(a, b) {
+			var normal = vec2Temp.setSub(b.pos, a.pos);
+			var dist = norm(normal);
+			if (dist > a.r + b.r) {
+				return null;
+			}
+			
+			var penetration = a.r + b.r - dist;
+			var point = vec2Temp2;
+			if (dist < 0.000005) {
+				normal.x = 0
+				normal.y = 1;
+				point.copyFrom(a.pos);
+			} else {
+				normal.mul(1 / dist);
+				point.set(a.pos.x + normal.x * a.r, a.pos.y + normal.y * a.r);
+			}
+			
+			return collisionManager.createCollision(a, b, point, normal, penetration);
+		}
+		
+		
+		function Scene() {
+			var bodies = [];
+			var collisions = [];
+			var broadPhaseSAP = new BroadPhaseSAP();
+			this.gravityG = 80;
+			this.iterationsCount = 30;
+			var circleColor = [1, 0, 0, 1];
+			var lineColor = [0, 1, 1, 1]; 
+			var wallColor = [0, 0, 1, 1]; 
+			
+			this.add = function(b) {
+        b.index = bodies.length;
+				bodies.push(b);
+				broadPhaseSAP.addBody(b);
+			}
+      
+      this.add(wall);
+			
+			this.step = function(dt) {
+				//collect collisions
+        collisionManager.clear();
+				collisions.length = 0;
+        
+        for (var i = 0; i < bodies.length; i++) {
+          bodies[i].collisions.length = 0;
+        }
+
+        var colIndex = 1; //start from 1!
+        //indexes [1...n]
+        
+				//check for collision with walls
+				for (var i = 0; i < bodies.length; i++) {
+					var cols = getCollisionWithWalls(bodies[i]);
+					for (var j = 0; j < cols.length; j++) {
+						collisions.push(cols[j]);
+            bodies[i].collisions.push(-colIndex);
+            colIndex++;
+					}
+				}
+				
+        //broad phase
+				broadPhaseSAP.update();
+        
+        //narrow phase
+				for (var i = 1; i < bodies.length; i++) { //exclude wall with index 0
+					var b1 = bodies[i];
+					for (var j = 0; j < b1.possibleCollisions.length; j++) {
+						var b2 = b1.possibleCollisions[j];
+						var col = getCollisionCircles(b1, b2);
+						if (col !== null) {
+							collisions.push(col);
+              b1.collisions.push(-colIndex);
+              b2.collisions.push(colIndex);
+              colIndex++;
+						}
+					}
+				}
+        
+				
+				
+				//apply gravity
+				for (var i = 1; i < bodies.length; i++) {
+					bodies[i].velocity.y -= this.gravityG * dt
+				}
+				
+				//init collisions
+				for (var i = 0; i < collisions.length; i++) {
+					collisions[i].init();
+				}
+				
+        
+				//resolve collisions
+        var gpu_flag = document.getElementById("gpu_flag").checked;
+        if (gpu_flag) {
+          resolveOnGPU(collisions, bodies, this.iterationsCount);
+        } else {
+          for (var it = 0; it < this.iterationsCount; it++) {
+            var vel = 0;
+            for (var i = 0; i < collisions.length; i++) {
+              vel += collisions[i].resolve();
+            }
+            if (vel < 1.0 * bodies.length) {
+              break;
+            }
+          }
+        }
+				
+				//integrate
+				for (var i = 0; i < bodies.length; i++) {
+					var b = bodies[i]
+					b.pos.add(b.velocity, dt);
+					b.angle -= b.angularVelocity * dt;
+				}
+				
+			}
+			
+			this.draw = function() {
+				//draw all circles
+        gl.useProgram(prog_show);
+        gl.viewport(0,0,width, height);
+				gl.clearColor(0, 0, 0, 0);
+				gl.clear(gl.COLOR_BUFFER_BIT);
+				gl.bindBuffer(gl.ARRAY_BUFFER, circleBuffer);
+				gl.uniform4fv(prog_show.uColorLoc, circleColor);
+				
+				gl.vertexAttribPointer(prog_show.aPosLoc, circleBuffer.itemSize, gl.FLOAT, false, 0, 0);
+				
+				for (var i = 0; i < bodies.length; i++) {
+					var circle = bodies[i];
+					var scale = circle.r / unitRadius;
+					var translationMatrix = m3.translation(circle.pos.x, circle.pos.y);
+					var scaleMatrix = m3.scaling(scale, scale);
+					var matrix = m3.multiply(translationMatrix, scaleMatrix);
+	 
+					// Set the matrix.
+					gl.uniformMatrix3fv(prog_show.uTransformLoc, false, matrix);
+					gl.drawArrays(gl.TRIANGLE_FAN, 0, circleBuffer.numItems);
+				}
+				
+				//draw angle line on circles
+				gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
+				gl.uniform4fv(prog_show.uColorLoc, lineColor);
+				
+				gl.vertexAttribPointer(prog_show.aPosLoc, lineBuffer.itemSize, gl.FLOAT, false, 0, 0);
+				
+				for (var i = 0; i < bodies.length; i++) {
+					var circle = bodies[i];
+					var scale = circle.r / unitRadius;
+					var translationMatrix = m3.translation(circle.pos.x, circle.pos.y);
+					var scaleMatrix = m3.scaling(scale, scale);
+					var rotationMatrix = m3.rotation(circle.angle);
+					var matrix = m3.multiply(translationMatrix, m3.multiply(scaleMatrix, rotationMatrix));
+					
+					// Set the matrix.
+					gl.uniformMatrix3fv(prog_show.uTransformLoc, false, matrix);
+					gl.drawArrays(gl.LINES, 0, lineBuffer.numItems);
+				}
+				
+				//draw walls
+				gl.bindBuffer(gl.ARRAY_BUFFER, wallsBuffer);
+				gl.uniform4fv(prog_show.uColorLoc, wallColor);
+				
+				gl.vertexAttribPointer(prog_show.aPosLoc, wallsBuffer.itemSize, gl.FLOAT, false, 0, 0);
+				
+				var idMatrix = m3.rotation(0);
+				gl.uniformMatrix3fv(prog_show.uTransformLoc, false, idMatrix);
+				gl.drawArrays(gl.LINE_LOOP, 0, wallsBuffer.numItems);
+			}
+		}
+		
+		var scene;
+		var gl;
+		var height;
+		var width;
+		var dt = 1/20;
+		var frames = 0;
+		var time;
+    var err = "Your browser does not support ";
+		
+		function initGL(canvas) {
+      if (!window.WebGLRenderingContext){
+        alert(err+"WebGL. See http://get.webgl.org");
+        return;}
+      try { gl = canvas.getContext("experimental-webgl");
+      } catch(e) {}
+      if ( !gl ) {alert("Can't get WebGL"); return;}
+      var ext;
+      try { ext = gl.getExtension("OES_texture_float");
+      } catch(e) {}
+      if ( !ext ) {alert(err + "OES_texture_float extension"); return;}
+		}
+    
+    /*
+        >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+        >                        GPGPU SECTION                          >
+        >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    */
+    
+    function createTexture(textureUnit) {
+       texture = gl.createTexture();
+       gl.activeTexture(gl.TEXTURE0 + textureUnit);
+       gl.bindTexture(gl.TEXTURE_2D, texture);
+       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+       return texture;
+    }
+
+    function fillTexture(texture, countRGBA, source) {
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, countRGBA, 1, 0, gl.RGBA, gl.FLOAT, source);
+    }
+    
+    var gl, prog_resolve, prog_apply, FBO_IMP0, FBO_IMP1, FBO_VEL, collBuffer,
+      maxCollCount = 4500, maxBodiesCount = 1500,
+      textureColl, textureVel, textureVelInit, textureImp0, textureImp1, textureBody,
+      collSource, velSource, impSource, bodySource,
+      collTextureUnit = 0, curVelTextureUnit = 1, initVelTextureUnit = 2, imp0TextureUnit = 3, imp1TextureUnit = 4, bodyTextureUnit = 5;
+    
+    function initGPGPU() {
+       prog_resolve  = gl.createProgram();
+       var vs = getShader( gl, "shader-vs-collision" )
+       gl.attachShader(prog_resolve, vs);
+       gl.attachShader(prog_resolve, getShader( gl, "shader-fs-collision-resolution" ));
+       gl.linkProgram(prog_resolve);
+       prog_apply = gl.createProgram();
+       gl.attachShader(prog_apply, vs);
+       gl.attachShader(prog_apply, getShader( gl, "shader-fs-collision-apply"));
+       gl.linkProgram(prog_apply);
+       
+       prog_resolve.aPosLoc = gl.getAttribLocation(prog_resolve, "aPos");
+       prog_resolve.aTexLoc = gl.getAttribLocation(prog_resolve, "aTexCoord");
+       gl.enableVertexAttribArray( prog_resolve.aPosLoc );
+       gl.enableVertexAttribArray( prog_resolve.aTexLoc );
+       var data = new Float32Array([-1,-1, 0,0,  1,-1, 1,0,  -1,1, 0,1,
+         1,1, 1,1]);
+       collBuffer = gl.createBuffer()
+       gl.bindBuffer(gl.ARRAY_BUFFER, collBuffer);
+       gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+       gl.vertexAttribPointer(prog_resolve.aPosLoc, 2, gl.FLOAT, gl.FALSE, 16, 0);
+       gl.vertexAttribPointer(prog_resolve.aTexLoc, 2, gl.FLOAT, gl.FALSE, 16, 8);
+       
+       var n = maxCollCount;
+       //we need to init collision texture (3 * 4 * n)
+       collSource = new Float32Array(3*4*n);
+       
+       //need to init body vel tex (bodiesCount * 4)
+       velSource = new Float32Array(n * 4);
+       
+       //init body collision graph 3 * 4 * bodiesCount
+       bodySource = new Float32Array(maxBodiesCount * 3 * 4);
+       
+       impSource = new Float32Array(4 * n); //input
+       //init state is zero
+       
+       
+       textureColl = createTexture(collTextureUnit);//, 3*n, collSource);
+       textureVel = createTexture(curVelTextureUnit);//, bodiesCount, velSource);
+       textureVelInit = createTexture(initVelTextureUnit);//, bodiesCount, velSource);
+       textureImp0 = createTexture(imp0TextureUnit);//, n, impSource0);
+       textureImp1 = createTexture(imp1TextureUnit);//, n, impSource1);
+       textureBody = createTexture(bodyTextureUnit);//, bodiesCount * 4, bodySource);
+       
+       FBO_IMP0 = gl.createFramebuffer();
+       FBO_IMP1 = gl.createFramebuffer();
+       FBO_VEL = gl.createFramebuffer();
+       
+       
+       if( gl.checkFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE)
+         alert(err + "FLOAT as the color attachment to an FBO");
+         
+         
+       prog_resolve.sampCollLoc = gl.getUniformLocation(prog_resolve, "uCollisionsTexture");
+       prog_resolve.sampVelLoc = gl.getUniformLocation(prog_resolve, "uVelTexture");
+       prog_resolve.sampImpLoc = gl.getUniformLocation(prog_resolve, "uImpTexture");
+       prog_resolve.collPixelSizeLoc = gl.getUniformLocation(prog_resolve, "collPixelSize");
+       
+       prog_apply.sampImpLoc = gl.getUniformLocation(prog_apply, "uImpTexture");
+       prog_apply.sampBodyTexture = gl.getUniformLocation(prog_apply, "uBodyTexture");
+       prog_apply.sampCollLoc = gl.getUniformLocation(prog_apply, "uCollisionsTexture");
+       prog_apply.sampInitVelLoc = gl.getUniformLocation(prog_apply, "uVelTexture");
+       prog_apply.bodyPixelSizeLoc = gl.getUniformLocation(prog_apply, "uBodyPixelSize");
+    }
+    
+    
+    function initData(collisions, bodies) {
+      var n = collisions.length;
+      var bodiesCount = bodies.length;
+      if (n > maxCollCount) {
+        alert("too many collisions! do not handle to keep it simple");
+      }
+      if (bodiesCount > maxBodiesCount) {
+        alert("too many bodies! do not handle to keep it simple");
+      }
+      
+      //bodies [0, 1, 2, ... bodiesCount - 1] -> [0, 1]
+      // (index + 0.5) / bodiesCount
+      
+      var t;
+      /*
+        collision
+         (bodyA, bodyB, normal.x, normal.y)
+         (ra.x, ra.y, rb.x, rb.y)
+         (friction, bias, massNormal, massTangent)
+      */
+      t = 0
+      for (var i = 0; i < n; i++) {
+        var c = collisions[i];
+        collSource[t++] = (c.a.index + 0.5) / bodiesCount;
+        collSource[t++] = (c.b.index + 0.5) / bodiesCount;
+        collSource[t++] = c.normal.x;
+        collSource[t++] = c.normal.y;
+        collSource[t++] = c.ra.x;
+        collSource[t++] = c.ra.y;
+        collSource[t++] = c.rb.y;
+        collSource[t++] = c.rb.y;
+        collSource[t++] = c.friction;
+        collSource[t++] = c.bias;
+        collSource[t++] = c.massNormal;
+        collSource[t++] = c.massTangent;
+      }
+      
+      /*
+        body vel
+          (vel.x, vel.y, angVel, 0)
+      */
+      t = 0;
+      for (var i = 0; i < bodiesCount; i++) {
+        var b = bodies[i];
+        velSource[t++] = b.velocity.x;
+        velSource[t++] = b.velocity.y;
+        velSource[t++] = b.angularVelocity;
+        velSource[t++] = 0; //TODO: just t++
+      }
+      
+      /*
+      body
+       (invMass, invI, colCoord, colCoord)
+       (colCoord, colCoord, colCoord, colCoord)
+       (colCoord, colCoord, colCoord, colCoord)
+          maximum 10 collisions
+      */
+      t = 0;
+      for (var i = 0; i < bodiesCount; i++) {
+        var b = bodies[i];
+        bodySource[t++] = b.invMass;
+        bodySource[t++] = b.invInertia;
+        var bColls = b.collisions;
+        if (bColls.length > 10) {
+          console.log("Warning! Body have more then 10 collision! Collisions tail was rejected!");
+        }
+        var len = Math.min(bColls.length, 10);
+        for (var j = 0; j < len; j++) {
+          var index = bColls[j];
+          bodySource[t++] = (Math.abs(index) - 0.5) / n * Math.sign(index);
+        }
+        for (var j = len; j < 10; j++) {
+          bodySource[t++] = 0.0;
+        }
+      }
+      
+      fillTexture(textureColl, 3*n, collSource);
+      fillTexture(textureVel, bodiesCount, velSource);
+      fillTexture(textureVelInit, bodiesCount, velSource);
+      fillTexture(textureImp0, n, impSource);
+      fillTexture(textureImp1, n, impSource);
+      fillTexture(textureBody, bodiesCount * 3, bodySource);
+      
+      gl.bindFramebuffer(gl.FRAMEBUFFER, FBO_IMP0);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textureImp0, 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, FBO_IMP1);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textureImp1, 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, FBO_VEL);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textureVel, 0);
+      
+      if( gl.checkFramebufferStatus(gl.FRAMEBUFFER) != gl.FRAMEBUFFER_COMPLETE)
+         alert(err + "FLOAT as the color attachment to an FBO");
+    }
+    
+    
+    function processIteration(n, bodiesCount) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, collBuffer);
+      gl.vertexAttribPointer(prog_resolve.aPosLoc, 2, gl.FLOAT, gl.FALSE, 16, 0);
+      gl.vertexAttribPointer(prog_resolve.aTexLoc, 2, gl.FLOAT, gl.FALSE, 16, 8);
+      
+      gl.useProgram(prog_resolve);
+      gl.viewport(0, 0, n, 1);
+      gl.uniform1f(prog_resolve.collPixelSizeLoc, 1.0 / (3 * n));
+      gl.uniform1i(prog_resolve.sampCollLoc, collTextureUnit);
+      gl.uniform1i(prog_resolve.sampVelLoc, curVelTextureUnit);
+      gl.uniform1i(prog_resolve.sampImpLoc, imp0TextureUnit); //0 imp   !should be!
+      gl.bindFramebuffer(gl.FRAMEBUFFER, FBO_IMP1); //1 imp    !different!
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      
+      
+      gl.useProgram(prog_apply);
+      gl.viewport(0, 0, bodiesCount, 1);
+      gl.uniform1f(prog_apply.bodyPixelSizeLoc, 1.0 / (3 * bodiesCount));
+      gl.uniform1i(prog_apply.sampCollLoc, collTextureUnit);
+      gl.uniform1i(prog_apply.sampInitVelLoc, initVelTextureUnit);
+      gl.uniform1i(prog_apply.sampBodyTexture, bodyTextureUnit);
+      gl.uniform1i(prog_apply.sampImpLoc, imp1TextureUnit); //1 imp
+      gl.bindFramebuffer(gl.FRAMEBUFFER, FBO_VEL); //out vel
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      
+      
+      gl.useProgram(prog_resolve);
+      gl.viewport(0, 0, n, 1);
+      gl.uniform1f(prog_resolve.collPixelSizeLoc, 1.0 / (3 * n));
+      gl.uniform1i(prog_resolve.sampCollLoc, collTextureUnit);
+      gl.uniform1i(prog_resolve.sampVelLoc, curVelTextureUnit);
+      gl.uniform1i(prog_resolve.sampImpLoc, imp1TextureUnit); //1 imp 
+      gl.bindFramebuffer(gl.FRAMEBUFFER, FBO_IMP0); //0 imp 
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      
+      
+      
+      gl.useProgram(prog_apply);
+      gl.viewport(0, 0, bodiesCount, 1);
+      gl.uniform1f(prog_apply.bodyPixelSizeLoc, 1.0 / (3 * bodiesCount));
+      gl.uniform1i(prog_apply.sampCollLoc, collTextureUnit);
+      gl.uniform1i(prog_apply.sampInitVelLoc, initVelTextureUnit);
+      gl.uniform1i(prog_apply.sampBodyTexture, bodyTextureUnit);
+      gl.uniform1i(prog_apply.sampImpLoc, imp0TextureUnit); //1 imp
+      gl.bindFramebuffer(gl.FRAMEBUFFER, FBO_VEL); //out vel
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+    
+    var out = new Float32Array(4*maxBodiesCount);
+    function resolveOnGPU(collisions, bodies, iterations) {
+      var n = collisions.length;
+      var bodiesCount = bodies.length;
+      
+      if (n > 0) {
+        initData(collisions, bodies);
+        
+        for (var i = 0; i < iterations; i++) {
+          processIteration(n, bodiesCount);
+        }
+        
+        gl.bindFramebuffer(gl.FRAMEBUFFER, FBO_VEL);
+        gl.readPixels(0, 0, bodiesCount, 1, gl.RGBA, gl.FLOAT, out);
+        
+        /*
+        for (var i = 0; i < bodiesCount; i++) {
+          var b = bodies[i];
+          b.velocity.x = out[4*i];
+          b.velocity.y = out[4*i+1];
+          b.angularVelocity = out[4*i+2];
+        }*/
+        
+        var outlog = []
+        for (var i = 0; i < bodiesCount; i++) {
+          outlog.push(out[i*4]);
+          outlog.push(out[i*4+1]);
+          outlog.push(out[i*4+2]);
+          outlog.push(out[i*4+3]);
+        }
+        console.log(outlog);
+        console.log(bodies[1].velocity);
+        //console.log(bodies[1].invMass);
+        //console.log(bodies[1].invInertia);
+        
+        debugger;
+      }
+    }
+    
+    /*
+        <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        <                        GPGPU SECTION                          <
+        <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    */
+		
+		var prog_show;
+		
+		function initShaders() {
+			var fs_show = getShader(gl, "shader-fs-show");
+			var vs_show = getShader(gl, "shader-vs-show");
+			
+			prog_show = gl.createProgram();
+			gl.attachShader(prog_show, vs_show);
+			gl.attachShader(prog_show, fs_show);
+			gl.linkProgram(prog_show);
+    
+
+			if (!gl.getProgramParameter(prog_show, gl.LINK_STATUS)) {
+				alert("Could not initialise show shaders");
+			}
+      
+			prog_show.aPosLoc = gl.getAttribLocation(prog_show, "aPos");
+			gl.enableVertexAttribArray(prog_show.aPosLoc);
+
+			prog_show.uTransformLoc = gl.getUniformLocation(prog_show, "uTransform");
+			prog_show.uColorLoc = gl.getUniformLocation(prog_show, "uColor");
+			prog_show.uResolutionLoc = gl.getUniformLocation(prog_show, "uResolution");
+      
+      gl.useProgram(prog_show);
+			gl.uniform2fv(prog_show.uResolutionLoc, [width, height]);
+      //TODO CHECK PERFORMANCE UNIFORM ARRAY VS TEXTURE
+      
+		}
+		
+		function getShader ( gl, id ){
+			var shaderScript = document.getElementById ( id );
+			var str = "";
+			var k = shaderScript.firstChild;
+			while ( k ){
+				if ( k.nodeType == 3 ) str += k.textContent;
+				k = k.nextSibling;
+			}
+			var shader;
+			if ( shaderScript.type == "x-shader/x-fragment" )
+			   shader = gl.createShader ( gl.FRAGMENT_SHADER );
+			else if ( shaderScript.type == "x-shader/x-vertex" )
+			   shader = gl.createShader(gl.VERTEX_SHADER);
+			else return null;
+			gl.shaderSource(shader, str);
+			gl.compileShader(shader);
+			if (gl.getShaderParameter(shader, gl.COMPILE_STATUS) == 0)
+				alert(gl.getShaderInfoLog(shader));
+			return shader;
+		}
+		
+		var circleBuffer, lineBuffer, wallsBuffer, collBuffer,
+        unitRadius = 25; //25 px
+		
+		function initBuffers() {
+			circleBuffer = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER, circleBuffer);
+			var vertices = [];
+			var count = 32;
+			for (var i = 0; i < count; i++) {
+				var angle = 2 * Math.PI / count * i;
+				vertices.push(Math.cos(angle) * unitRadius);
+				vertices.push(Math.sin(angle) * unitRadius);
+			}
+			
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+			circleBuffer.itemSize = 2;
+			circleBuffer.numItems = count;
+			
+			
+			lineBuffer = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
+			vertices = [0.0, 0.0, 
+							unitRadius, 0.0];
+			
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+			lineBuffer.itemSize = 2;
+			lineBuffer.numItems = 2;
+			
+			
+			wallsBuffer = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER, wallsBuffer);
+			vertices = [-width/2, -height/2,
+						width/2, -height/2,
+						width/2, height/2,
+						-width/2, height/2]
+						
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+			wallsBuffer.itemSize = 2;
+			wallsBuffer.numItems = 4;
+		}
+		
+		function init() {
+			var canvas = document.getElementById('myCanvas');
+			width = canvas.width;
+			height = canvas.height;
+			
+			initGL(canvas);
+			initShaders();
+			initBuffers();
+      initGPGPU();
+			
+			
+			scene = new Scene();
+	
+			setInterval(fr, 500);
+			time = new Date().getTime();
+		
+		}
+		
+		function start() {
+			init();
+      
+			var c;
+			
+			/*
+			//scene.bodies.push(new Circle(new Vec2(-100, 100), 20));
+			for (var i = 0; i < 1; i++) {
+				c = new Circle(new Vec2(Math.random()*width - width/2, Math.random()*height - height/2), 20);
+				//c.restitution = 0.5;
+				//c.velocity.x = Math.random()*50 - 25;
+				//c.velocity.y = Math.random()*50 - 25;
+				
+				scene.add(c);
+			}*/
+			
+      c = new Circle(new Vec2(0, 0), 20);
+      scene.add(c);
+
+			animate();
+		}
+		
+		function animate() {
+			scene.step(dt);
+			scene.draw();
+			frames++;
+			requestAnimationFrame(animate);
+		}
+		
+		function fr(){
+			var ti = new Date().getTime();
+			var fps = Math.round(1000*frames/(ti - time));
+			document.getElementById("framerate").value = fps;
+			frames = 0;  time = ti;
+		}
+		
+	</script>
+	  
+    <script>
+      function hello() {
+        console.log("lel");
+      }
+    </script>
+    <style>
+      body {
+        margin: 0px;
+        padding: 0px;
+      }
+    </style>
+  </head>
+  <body onload="start()">
+    <canvas id="myCanvas" width="1024" height="768"></canvas><br>
+    framerate:<input size="2" id="framerate">fps
+    <input type="checkbox" id="gpu_flag" /> GPU <br><br><br>
+  </body>
+</html>      
